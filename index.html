@@ -2,263 +2,205 @@
 <html lang="fr">
 <head>
   <meta charset="UTF-8">
-  <title>Détours STM – Carte Montréal</title>
+  <title>Détours STM – Version 2.0</title>
   <meta name="viewport" content="width=device-width, initial-scale=1">
 
   <!-- Leaflet CSS -->
   <link
     rel="stylesheet"
     href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
-    integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
-    crossorigin=""
   />
 
   <style>
     body {
       margin: 0;
-      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      font-family: system-ui, sans-serif;
       background: #f5f5f5;
-    }
-    .top {
-      padding: 12px 16px 4px 16px;
-      background: #ffffff;
-      box-shadow: 0 2px 6px rgba(0,0,0,0.08);
-      position: relative;
-      z-index: 1000;
-    }
-    h1 {
-      font-size: 20px;
-      margin: 0 0 4px 0;
-    }
-    small {
-      color: #666;
     }
     #map {
       width: 100vw;
       height: 55vh;
     }
     .panel {
-      padding: 10px 16px 16px 16px;
       background: #ffffff;
-    }
-    label {
-      display: block;
-      font-size: 13px;
-      font-weight: 600;
-      margin-top: 6px;
-    }
-    input, button {
-      width: 100%;
-      box-sizing: border-box;
-      padding: 8px 10px;
-      margin-top: 4px;
-      border-radius: 8px;
-      border: 1px solid #ccc;
-      font-size: 14px;
-    }
-    button {
-      border: none;
-      background: #1976d2;
-      color: #fff;
-      font-weight: 600;
-      margin-top: 10px;
-      cursor: pointer;
-    }
-    button:disabled {
-      background: #9e9e9e;
-      cursor: default;
+      padding: 14px;
     }
     .chip {
       display: inline-block;
       background: #e3f2fd;
-      border-radius: 999px;
-      padding: 2px 10px;
-      font-size: 11px;
-      margin-right: 4px;
+      padding: 4px 8px;
+      border-radius: 8px;
+      font-size: 12px;
+      margin: 2px;
     }
-    #status {
-      font-size: 13px;
-      margin-top: 6px;
-      color: #444;
+    button {
+      width: 100%;
+      padding: 10px;
+      border: none;
+      border-radius: 6px;
+      background: #1976d2;
+      color: #fff;
+      font-weight: bold;
+      cursor: pointer;
+      margin-top: 12px;
+    }
+    button:disabled {
+      background: #9e9e9e;
     }
     #steps {
-      font-size: 13px;
-      margin-top: 8px;
-      max-height: 25vh;
-      overflow-y: auto;
-      border-top: 1px solid #eee;
-      padding-top: 6px;
-    }
-    .step {
-      margin-bottom: 4px;
+      margin-top: 10px;
+      font-size: 14px;
     }
   </style>
 </head>
+
 <body>
-  <div class="top">
-    <h1>Détours STM</h1>
-    <small>
-      1️⃣ Clique sur la carte pour le <strong>point AVANT</strong> l’entrave.<br>
-      2️⃣ Clique une deuxième fois pour le <strong>point APRÈS</strong> l’entrave.<br>
-      3️⃣ Appuie sur « Calculer le détour ».
-    </small>
+  <div class="panel">
+    <h2>Détours STM – v2.0</h2>
+    <p>1️⃣ Clique pour le point AVANT<br>2️⃣ Clique pour le point APRÈS<br>3️⃣ Appuie sur « Calculer »</p>
+    <div id="chips"></div>
+    <button id="btnRoute" disabled>Calculer le détour</button>
+    <button id="btnReset" style="background:#cccccc; color:#000;">Réinitialiser</button>
+    <div id="status"></div>
   </div>
 
   <div id="map"></div>
 
   <div class="panel">
-    <label for="ligne">Ligne d'autobus (optionnel)</label>
-    <input id="ligne" type="number" placeholder="Ex : 165, 51, 24...">
-
-    <div style="margin-top:6px;">
-      <span class="chip" id="chipStart">Point AVANT : non défini</span>
-      <span class="chip" id="chipEnd">Point APRÈS : non défini</span>
-    </div>
-
-    <button id="btnRoute" disabled>Calculer le détour</button>
-    <button id="btnReset" style="margin-top:6px; background:#eeeeee; color:#333;">Réinitialiser</button>
-
-    <div id="status"></div>
     <div id="steps"></div>
   </div>
 
   <!-- Leaflet JS -->
-  <script
-    src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
-    integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
-    crossorigin="">
-  </script>
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 
   <script>
-    // Initialisation de la carte centrée sur Montréal
-    var map = L.map('map').setView([45.51, -73.60], 12);
+    var map = L.map('map').setView([45.52, -73.57], 12);
 
-    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-      maxZoom: 19,
-      attribution: '&copy; OpenStreetMap'
+    L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+      maxZoom: 19
     }).addTo(map);
 
-    var startMarker = null;
-    var endMarker = null;
-    var routeLayer = null;
+    let start = null, end = null;
+    let startMarker = null, endMarker = null;
+    let routeLayer = null;
 
-    var btnRoute = document.getElementById('btnRoute');
-    var btnReset = document.getElementById('btnReset');
-    var statusDiv = document.getElementById('status');
-    var stepsDiv = document.getElementById('steps');
-    var chipStart = document.getElementById('chipStart');
-    var chipEnd = document.getElementById('chipEnd');
+    const btnRoute = document.getElementById("btnRoute");
+    const btnReset = document.getElementById("btnReset");
+    const chips = document.getElementById("chips");
+    const statusDiv = document.getElementById("status");
+    const stepsDiv = document.getElementById("steps");
+
+    // Fonction pour SNAPPER automatiquement sur la route la plus proche
+    async function snapToRoad(lat, lng) {
+      const url = `https://router.project-osrm.org/nearest/v1/driving/${lng},${lat}`;
+      const res = await fetch(url);
+      const data = await res.json();
+
+      if (data && data.waypoints && data.waypoints.length > 0) {
+        return {
+          lat: data.waypoints[0].location[1],
+          lng: data.waypoints[0].location[0]
+        };
+      }
+
+      return { lat, lng }; // fallback
+    }
 
     function updateChips() {
-      if (startMarker) {
-        var s = startMarker.getLatLng();
-        chipStart.textContent = "Point AVANT : " + s.lat.toFixed(5) + ", " + s.lng.toFixed(5);
-      } else {
-        chipStart.textContent = "Point AVANT : non défini";
+      chips.innerHTML = "";
+
+      if (start)
+        chips.innerHTML += `<span class="chip">AVANT : ${start.lat.toFixed(5)}, ${start.lng.toFixed(5)}</span>`;
+      if (end)
+        chips.innerHTML += `<span class="chip">APRÈS : ${end.lat.toFixed(5)}, ${end.lng.toFixed(5)}</span>`;
+
+      btnRoute.disabled = !(start && end);
+    }
+
+    // Clic sur la carte
+    map.on("click", async function (e) {
+      const snapped = await snapToRoad(e.latlng.lat, e.latlng.lng);
+
+      if (!start) {
+        start = snapped;
+        if (startMarker) map.removeLayer(startMarker);
+        startMarker = L.marker(start).addTo(map);
       }
-      if (endMarker) {
-        var e = endMarker.getLatLng();
-        chipEnd.textContent = "Point APRÈS : " + e.lat.toFixed(5) + ", " + e.lng.toFixed(5);
-      } else {
-        chipEnd.textContent = "Point APRÈS : non défini";
+      else if (!end) {
+        end = snapped;
+        if (endMarker) map.removeLayer(endMarker);
+        endMarker = L.marker(end).addTo(map);
+      }
+      else {
+        // Reset auto si 3ème clic
+        resetAll();
+        start = snapped;
+        startMarker = L.marker(start).addTo(map);
       }
 
-      btnRoute.disabled = !(startMarker && endMarker);
+      updateChips();
+    });
+
+    async function calculateRoute() {
+      statusDiv.innerHTML = "Calcul du détour...";
+      stepsDiv.innerHTML = "";
+
+      let retries = [
+        [start, end],
+        // petites variantes en cas de sens unique
+        [{ lat: start.lat+0.0001, lng: start.lng+0.0001 }, end],
+        [{ lat: start.lat-0.0001, lng: start.lng-0.0001 }, end],
+        [start, { lat: end.lat+0.0001, lng: end.lng+0.0001 }],
+        [start, { lat: end.lat-0.0001, lng: end.lng-0.0001 }],
+      ];
+
+      for (let [s, e] of retries) {
+        let url = `https://router.project-osrm.org/route/v1/driving/${s.lng},${s.lat};${e.lng},${e.lat}?overview=full&geometries=geojson&steps=true`;
+
+        try {
+          let res = await fetch(url);
+          let data = await res.json();
+
+          if (data.routes && data.routes.length > 0) {
+            displayRoute(data.routes[0]);
+            return;
+          }
+        } catch (err) {}
+      }
+
+      statusDiv.innerHTML = "<span style='color:red;'>Impossible de trouver un itinéraire valide.</span>";
+    }
+
+    function displayRoute(route) {
+      statusDiv.innerHTML =
+        `Distance : ${(route.distance/1000).toFixed(2)} km — Temps : ${Math.round(route.duration/60)} min`;
+
+      if (routeLayer) map.removeLayer(routeLayer);
+      routeLayer = L.geoJSON(route.geometry).addTo(map);
+
+      map.fitBounds(routeLayer.getBounds(), { padding: [20, 20] });
+
+      let html = `<h3>Instructions :</h3>`;
+      route.legs[0].steps.forEach((s, i) => {
+        html += `<div>${i+1}. ${s.maneuver.instruction}</div>`;
+      });
+      stepsDiv.innerHTML = html;
     }
 
     function resetAll() {
-      if (startMarker) {
-        map.removeLayer(startMarker);
-        startMarker = null;
-      }
-      if (endMarker) {
-        map.removeLayer(endMarker);
-        endMarker = null;
-      }
-      if (routeLayer) {
-        map.removeLayer(routeLayer);
-        routeLayer = null;
-      }
+      start = null;
+      end = null;
+      if (startMarker) map.removeLayer(startMarker);
+      if (endMarker) map.removeLayer(endMarker);
+      if (routeLayer) map.removeLayer(routeLayer);
+
       stepsDiv.innerHTML = "";
-      statusDiv.textContent = "";
+      statusDiv.innerHTML = "";
       updateChips();
     }
 
-    btnReset.addEventListener('click', function () {
-      resetAll();
-    });
-
-    // Sélection des points de départ/arrivée
-    map.on('click', function (e) {
-      var latlng = e.latlng;
-
-      if (!startMarker) {
-        startMarker = L.marker(latlng, { draggable: true }).addTo(map);
-        startMarker.on('dragend', updateChips);
-      } else if (!endMarker) {
-        endMarker = L.marker(latlng, { draggable: true }).addTo(map);
-        endMarker.on('dragend', updateChips);
-      } else {
-        // Si les deux sont déjà posés, on recommence
-        resetAll();
-        startMarker = L.marker(latlng, { draggable: true }).addTo(map);
-        startMarker.on('dragend', updateChips);
-      }
-      updateChips();
-    });
-
-    btnRoute.addEventListener('click', function () {
-      if (!startMarker || !endMarker) return;
-
-      if (routeLayer) {
-        map.removeLayer(routeLayer);
-        routeLayer = null;
-      }
-      stepsDiv.innerHTML = "";
-
-      var s = startMarker.getLatLng();
-      var e = endMarker.getLatLng();
-
-      statusDiv.textContent = "Calcul du détour en cours...";
-
-      // URL OSRM
-      var url = "https://router.project-osrm.org/route/v1/driving/"
-        + s.lng + "," + s.lat + ";" + e.lng + "," + e.lat
-        + "?overview=full&geometries=geojson&steps=true&language=fr";
-
-      fetch(url)
-        .then(function (r) { return r.json(); })
-        .then(function (data) {
-          if (!data.routes || !data.routes.length) {
-            statusDiv.textContent = "Aucun itinéraire trouvé.";
-            return;
-          }
-
-          var route = data.routes[0];
-
-          statusDiv.textContent =
-            "Détour trouvé : ~" + (route.distance / 1000).toFixed(2) + " km, "
-            + Math.round(route.duration / 60) + " min.";
-
-          // Tracé de l'itinéraire
-          routeLayer = L.geoJSON(route.geometry).addTo(map);
-          map.fitBounds(routeLayer.getBounds(), { padding: [20, 20] });
-
-          // Instructions
-          var html = "<h3>Instructions du détour</h3>";
-          route.legs[0].steps.forEach(function (step, i) {
-            html += "<div class='step'><strong>" + (i + 1) + ".</strong> "
-              + step.maneuver.instruction + "</div>";
-          });
-          stepsDiv.innerHTML = html;
-        })
-        .catch(function (err) {
-          console.error(err);
-          statusDiv.textContent = "Erreur lors du calcul du détour.";
-        });
-    });
-
-    updateChips();
+    btnRoute.onclick = calculateRoute;
+    btnReset.onclick = resetAll;
   </script>
 </body>
 </html>
