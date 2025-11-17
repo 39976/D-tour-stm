@@ -3,23 +3,24 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Détours STM – v2.5 (Entrave réelle)</title>
+  <title>Détours STM – v3.0 (GraphHopper)</title>
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+
   <style>
-    body { font-family: sans-serif; margin: 0; background: #f3f3f3; }
-    #map { height: 55vh; }
-    .panel { padding: 12px; background: white; }
-    button { width: 100%; margin-top: 10px; padding: 10px; border-radius: 6px; border: none; font-size: 16px; }
-    .ok { background: #1976d2; color: white; }
-    .reset { background: #ddd; color: black; }
-    .chip { display: inline-block; padding: 4px 8px; background: #e3f2fd; border-radius: 8px; margin: 2px; font-size: 12px; }
+    body { font-family: sans-serif; margin:0; background:#f5f5f5; }
+    #map { height:55vh; }
+    .panel { padding:14px; background:#fff; }
+    button { width:100%; padding:10px; border:none; border-radius:6px; font-size:16px; }
+    .ok { background:#1976d2; color:white; }
+    .reset { background:#ccc; color:black; margin-top:8px; }
+    .chip { display:inline-block; background:#e3f2fd; padding:6px 10px; border-radius:8px; margin:3px; font-size:13px; }
   </style>
 </head>
 <body>
 
 <div class="panel">
-  <h2>Détours STM – v2.5</h2>
-  <p>1️⃣ Clique le point AVANT<br>2️⃣ Clique le point APRÈS<br>3️⃣ Calcule le détour</p>
+  <h2>Détours STM – v3.0</h2>
+  <p>1️⃣ Clique AVANT<br>2️⃣ Clique APRÈS<br>3️⃣ On force le détour</p>
   <div id="chips"></div>
   <button id="btn" class="ok" disabled>Calculer le détour</button>
   <button id="reset" class="reset">Réinitialiser</button>
@@ -33,62 +34,58 @@
 </div>
 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
 <script>
+// ---------------------
+//  CONFIG
+// ---------------------
+const API_KEY = "87a97ff3-8371-4f51-a54d-79f0d8f9fa48";
+
+// ---------------------
+//  INIT MAP
+// ---------------------
 let map = L.map("map").setView([45.52, -73.57], 12);
 L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png").addTo(map);
 
 let start = null, end = null;
 let m1 = null, m2 = null, routeLayer = null;
 
-function updateChips() {
-  let div = document.getElementById("chips");
-  div.innerHTML = "";
-  if (start) div.innerHTML += `<span class="chip">AVANT : ${start.lat.toFixed(5)}, ${start.lng.toFixed(5)}</span>`;
-  if (end) div.innerHTML += `<span class="chip">APRÈS : ${end.lat.toFixed(5)}, ${end.lng.toFixed(5)}</span>`;
-  document.getElementById("btn").disabled = !(start && end);
-}
+// Snap à la route
+async function snapToRoad(lat, lng) {
+  const url = `https://graphhopper.com/api/1/geocode?reverse=true&point=${lat},${lng}&key=${API_KEY}`;
+  let r = await (await fetch(url)).json();
 
-// Snap-to-road
-async function snap(lat, lng) {
-  let url = `https://router.project-osrm.org/nearest/v1/driving/${lng},${lat}`;
-  let j = await (await fetch(url)).json();
-  if (j && j.waypoints && j.waypoints.length)
-    return { lat: j.waypoints[0].location[1], lng: j.waypoints[0].location[0] };
+  if (r && r.hits && r.hits.length) {
+    return {
+      lat: r.hits[0].point.lat,
+      lng: r.hits[0].point.lng
+    };
+  }
   return { lat, lng };
 }
 
-// Polygon around road closure
-function buildAvoidPolygon(s, e) {
-  // petit rectangle autour du segment
-  let dx = e.lng - s.lng;
-  let dy = e.lat - s.lat;
-
-  let n = 0.0002; // largeur du polygone (~20m)
-
-  let poly = [
-    [s.lng - dy*n, s.lat + dx*n],
-    [s.lng + dy*n, s.lat - dx*n],
-    [e.lng + dy*n, e.lat - dx*n],
-    [e.lng - dy*n, e.lat + dx*n],
-    [s.lng - dy*n, s.lat + dx*n] // close
-  ];
-
-  return poly.map(p => p.join(",")).join(";");
+function updateChips() {
+  let html = "";
+  if (start) html += `<span class="chip">AVANT : ${start.lat.toFixed(5)}, ${start.lng.toFixed(5)}</span>`;
+  if (end) html += `<span class="chip">APRÈS : ${end.lat.toFixed(5)}, ${end.lng.toFixed(5)}</span>`;
+  document.getElementById("chips").innerHTML = html;
+  document.getElementById("btn").disabled = !(start && end);
 }
 
 map.on("click", async e => {
-  let p = await snap(e.latlng.lat, e.latlng.lng);
+  let p = await snapToRoad(e.latlng.lat, e.latlng.lng);
 
   if (!start) {
     start = p;
     if (m1) map.removeLayer(m1);
     m1 = L.marker(start).addTo(map);
+
   } else if (!end) {
     end = p;
     if (m2) map.removeLayer(m2);
     m2 = L.marker(end).addTo(map);
+
   } else {
-    // reset auto
     resetAll();
     start = p;
     m1 = L.marker(start).addTo(map);
@@ -97,39 +94,65 @@ map.on("click", async e => {
   updateChips();
 });
 
+// Crée un petit rectangle autour du segment à bloquer
+function buildBlockArea(s, e) {
+  let dx = e.lng - s.lng;
+  let dy = e.lat - s.lat;
+
+  let n = 0.00015;
+
+  let poly = [
+    [s.lat + dx*n, s.lng - dy*n],
+    [s.lat - dx*n, s.lng + dy*n],
+    [e.lat - dx*n, e.lng + dy*n],
+    [e.lat + dx*n, e.lng - dy*n]
+  ];
+
+  return poly.map(p => p[0] + "," + p[1]).join(";");
+}
+
 async function calc() {
-  document.getElementById("status").innerHTML = "Calcul du détour...";
+  document.getElementById("status").innerHTML = "Calcul du détour…";
   document.getElementById("steps").innerHTML = "";
 
-  // construction du polygone d’entrave
-  let poly = buildAvoidPolygon(start, end);
+  let block = buildBlockArea(start, end);
 
   let url =
-    `https://router.project-osrm.org/route/v1/driving/` +
-    `${start.lng},${start.lat};${end.lng},${end.lat}` +
-    `?geometries=geojson&overview=full&steps=true&exclude=poly:${poly}`;
+    `https://graphhopper.com/api/1/route?` +
+    `point=${start.lat},${start.lng}&point=${end.lat},${end.lng}` +
+    `&vehicle=car&locale=fr&calc_points=true&instructions=true` +
+    `&block_area=${block}` +
+    `&key=${API_KEY}`;
 
   let res = await fetch(url);
   let data = await res.json();
 
-  if (!data.routes || !data.routes.length) {
+  if (!data.paths || !data.paths.length) {
     document.getElementById("status").innerHTML =
       "<span style='color:red;'>Impossible de calculer un détour</span>";
     return;
   }
 
-  let r = data.routes[0];
+  let path = data.paths[0];
 
+  // Trace du détour
   if (routeLayer) map.removeLayer(routeLayer);
-  routeLayer = L.geoJSON(r.geometry).addTo(map);
+  routeLayer = L.polyline(
+    path.points.coordinates.map(c => [c[1], c[0]]),
+    { color:"blue", weight:5 }
+  ).addTo(map);
 
   map.fitBounds(routeLayer.getBounds());
 
+  // Résumé
   document.getElementById("status").innerHTML =
-    `Distance : ${(r.distance/1000).toFixed(2)} km – Temps : ${(r.duration/60).toFixed(0)} min`;
+    `Distance : ${(path.distance/1000).toFixed(2)} km — Temps : ${(path.time/60000).toFixed(0)} min`;
 
+  // Instructions
   let html = "<h3>Instructions :</h3>";
-  r.legs[0].steps.forEach((s, i) => html += `${i+1}. ${s.maneuver.instruction}<br>`);
+  path.instructions.forEach((i, idx) => {
+    html += `${idx+1}. ${i.text}<br>`;
+  });
   document.getElementById("steps").innerHTML = html;
 }
 
