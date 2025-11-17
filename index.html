@@ -1,43 +1,4 @@
-<!DOCTYPE html>
-<html lang="fr">
-<head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Détours STM – v3.1 (GraphHopper Fix)</title>
-  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
-
-  <style>
-    body { font-family:sans-serif; margin:0; background:#f5f5f5; }
-    #map { height:55vh; }
-    .panel { padding:14px; background:white; }
-    button { width:100%; padding:10px; border:none; border-radius:6px; font-size:16px; }
-    .ok { background:#1976d2; color:white; }
-    .reset { background:#ccc; color:black; margin-top:8px; }
-    .chip { display:inline-block; background:#e3f2fd; padding:6px 10px; border-radius:8px; margin:3px; font-size:13px; }
-  </style>
-</head>
-
-<body>
-
-<div class="panel">
-  <h2>Détours STM – v3.1</h2>
-  <p>1️⃣ Clique AVANT<br>2️⃣ Clique APRÈS<br>3️⃣ Calcule le détour</p>
-  <div id="chips"></div>
-  <button id="btn" class="ok" disabled>Calculer le détour</button>
-  <button id="reset" class="reset">Réinitialiser</button>
-  <div id="status"></div>
-</div>
-
-<div id="map"></div>
-
-<div class="panel">
-  <div id="steps"></div>
-</div>
-
-<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-
 <script>
-// Clé API
 const API_KEY = "87a97ff3-8371-4f51-a54d-79f0d8f9fa48";
 
 let map = L.map("map").setView([45.52, -73.57], 12);
@@ -46,37 +7,47 @@ L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png").addTo(map);
 let start = null, end = null;
 let m1 = null, m2 = null, routeLayer = null;
 
-// Snap correct
+// Snap sur route GRAPHOPPER (pas OSM)
 async function snap(lat, lng) {
-  const url = `https://graphhopper.com/api/1/geocode?reverse=true&point=${lat},${lng}&key=${API_KEY}`;
+  const url =
+    `https://graphhopper.com/api/1/route?point=${lat},${lng}&point=${lat+0.0001},${lng+0.0001}` +
+    `&vehicle=car&key=${API_KEY}&locale=fr&point_hint=street`;
+
   let r = await (await fetch(url)).json();
-  if (r.hits && r.hits.length)
-    return { lat: r.hits[0].point.lat, lng: r.hits[0].point.lng };
+  if (r.paths && r.paths[0] && r.paths[0].snapped_waypoints) {
+    let p = r.paths[0].snapped_waypoints.coordinates[0];
+    return { lat: p[1], lng: p[0] };
+  }
   return { lat, lng };
 }
 
-function updateChips() {
-  let str = "";
-  if (start) str += `<span class="chip">AVANT : ${start.lat.toFixed(5)}, ${start.lng.toFixed(5)}</span>`;
-  if (end) str += `<span class="chip">APRÈS : ${end.lat.toFixed(5)}, ${end.lng.toFixed(5)}</span>`;
-  document.getElementById("chips").innerHTML = str;
-  document.getElementById("btn").disabled = !(start && end);
-}
-
-// Polygone parfaitement compatible GraphHopper
+// Calcul du rectangle parfaitement parallèle à la rue
 function buildBlockArea(s, e) {
   let dx = e.lng - s.lng;
   let dy = e.lat - s.lat;
 
-  let w = 0.00025; // largeur 25m
+  let len = Math.sqrt(dx*dx + dy*dy);
+  dx /= len;
+  dy /= len;
 
-  // Rectangle
-  let p1 = [s.lat + w, s.lng + w];
-  let p2 = [s.lat - w, s.lng - w];
-  let p3 = [e.lat - w, e.lng - w];
-  let p4 = [e.lat + w, e.lng + w];
+  let w = 0.00020; // largeur 20m
+  let l = 0.00010; // long côté
+
+  let p1 = [s.lat + dy*w, s.lng - dx*w];
+  let p2 = [s.lat - dy*w, s.lng + dx*w];
+  let p3 = [e.lat - dy*w, e.lng + dx*w];
+  let p4 = [e.lat + dy*w, e.lng - dx*w];
 
   return `${p1.join(",")};${p2.join(",")};${p3.join(",")};${p4.join(",")};${p1.join(",")}`;
+}
+
+function updateChips() {
+  let chip = "";
+  if (start) chip += `<span class="chip">AVANT : ${start.lat.toFixed(5)}, ${start.lng.toFixed(5)}</span>`;
+  if (end) chip += `<span class="chip">APRÈS : ${end.lat.toFixed(5)}, ${end.lng.toFixed(5)}</span>`;
+  document.getElementById("chips").innerHTML = chip;
+
+  document.getElementById("btn").disabled = !(start && end);
 }
 
 map.on("click", async e => {
@@ -86,21 +57,22 @@ map.on("click", async e => {
     start = p;
     if (m1) map.removeLayer(m1);
     m1 = L.marker(start).addTo(map);
-  }
-  else if (!end) {
+  } else if (!end) {
     end = p;
     if (m2) map.removeLayer(m2);
     m2 = L.marker(end).addTo(map);
-  }
-  else {
-    resetAll();
+  } else {
     start = p;
+    end = null;
+    if (m1) map.removeLayer(m1);
+    if (m2) map.removeLayer(m2);
     m1 = L.marker(start).addTo(map);
   }
 
   updateChips();
 });
 
+// CALCUL
 async function calc() {
   document.getElementById("status").innerHTML = "Calcul du détour…";
 
@@ -132,30 +104,15 @@ async function calc() {
 
   map.fitBounds(routeLayer.getBounds());
 
-  document.getElementById("status").innerHTML =
-    `Distance : ${(path.distance/1000).toFixed(2)} km — Temps : ${(path.time/60000).toFixed(0)} min`;
+  // Affichage étapes
+  let steps = path.instructions
+    .map(i => `<li>${i.text} (${i.distance} m)</li>`)
+    .join("");
 
-  let html = "<h3>Instructions :</h3>";
-  path.instructions.forEach((i, idx) => {
-    html += `${idx+1}. ${i.text}<br>`;
-  });
-  document.getElementById("steps").innerHTML = html;
-}
-
-function resetAll() {
-  start = end = null;
-  if (m1) map.removeLayer(m1);
-  if (m2) map.removeLayer(m2);
-  if (routeLayer) map.removeLayer(routeLayer);
-  m1 = m2 = routeLayer = null;
-  document.getElementById("chips").innerHTML = "";
+  document.getElementById("steps").innerHTML = `<ul>${steps}</ul>`;
   document.getElementById("status").innerHTML = "";
-  document.getElementById("steps").innerHTML = "";
 }
 
 document.getElementById("btn").onclick = calc;
-document.getElementById("reset").onclick = resetAll;
+document.getElementById("reset").onclick = () => location.reload();
 </script>
-
-</body>
-</html>
