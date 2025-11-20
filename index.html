@@ -1,19 +1,19 @@
 <!DOCTYPE html>
 <html lang="fr">
 <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Détours STM – v3.2</title>
 
     <!-- Leaflet -->
-    <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css"/>
-    <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 
     <style>
         body {
             margin: 0;
             padding: 0;
-            font-family: "Inter", sans-serif;
+            font-family: Arial, sans-serif;
         }
 
         #map {
@@ -21,7 +21,6 @@
             width: 100vw;
         }
 
-        /* Floating action buttons */
         #floating-actions {
             position: fixed;
             bottom: 25px;
@@ -29,13 +28,14 @@
             display: flex;
             flex-direction: column;
             gap: 12px;
+            z-index: 1000;
         }
 
         .fab {
             background: white;
             padding: 12px 18px;
-            border: none;
             border-radius: 12px;
+            border: none;
             font-size: 15px;
             font-weight: bold;
             box-shadow: 0 4px 10px rgba(0,0,0,0.25);
@@ -46,10 +46,6 @@
             background: #ff4d4d;
             color: white;
         }
-
-        .fab:active {
-            transform: scale(0.95);
-        }
     </style>
 </head>
 
@@ -57,79 +53,81 @@
 
     <div id="map"></div>
 
-    <!-- Buttons -->
     <div id="floating-actions">
         <button class="fab" id="avantBtn">Avant</button>
         <button class="fab fab-red" id="apresBtn">Après</button>
     </div>
 
     <script>
-        // ----- UTILITAIRE : Décodage polyline GraphHopper -----
         function decodePolyline(encoded) {
             let coords = [];
             let index = 0, lat = 0, lng = 0;
 
             while (index < encoded.length) {
                 let b, shift = 0, result = 0;
+
                 do {
                     b = encoded.charCodeAt(index++) - 63;
                     result |= (b & 0x1f) << shift;
                     shift += 5;
                 } while (b >= 0x20);
+
                 let dlat = (result & 1) ? ~(result >> 1) : (result >> 1);
                 lat += dlat;
 
                 shift = 0;
                 result = 0;
+
                 do {
                     b = encoded.charCodeAt(index++) - 63;
                     result |= (b & 0x1f) << shift;
                     shift += 5;
                 } while (b >= 0x20);
+
                 let dlng = (result & 1) ? ~(result >> 1) : (result >> 1);
                 lng += dlng;
 
                 coords.push([lat / 1e5, lng / 1e5]);
             }
-
             return coords;
         }
 
-        // ----- APPEL API GRAPHHOPPER -----
         const API_KEY = "TA_CLE_ICI";
 
-        async function getRoute(points, isAfter = false) {
-            let url =
-                "https://graphhopper.com/api/1/route?" +
-                "key=" + API_KEY +
-                "&vehicle=car" +
-                "&locale=fr" +
-                "&instructions=true" +
-                "&points_encoded=true" +
-                "&ch.disable=true"; // permet modifications
+        async function getRoute(points, detour = false) {
+            let url = "https://graphhopper.com/api/1/route?";
+            url += "key=" + API_KEY;
+            url += "&vehicle=car";
+            url += "&locale=fr";
+            url += "&points_encoded=true";
+            url += "&instructions=false";
+            url += "&ch.disable=true";
 
-            for (let p of points) {
+            points.forEach(p => {
                 url += `&point=${p.lat},${p.lng}`;
+            });
+
+            try {
+                const response = await fetch(url);
+                const data = await response.json();
+
+                if (!data.paths || !data.paths[0]) {
+                    alert("Erreur GraphHopper: aucun chemin trouvé");
+                    return null;
+                }
+
+                return {
+                    coords: decodePolyline(data.paths[0].points),
+                    distance: data.paths[0].distance,
+                    time: data.paths[0].time
+                };
+            } catch (e) {
+                alert("Erreur API");
+                console.error(e);
+                return null;
             }
-
-            if (isAfter) {
-                // Voici où tu ajouteras block_area en v4.0
-                // url += "&block_area=45.502,-73.565,45.503,-73.566";
-            }
-
-            const response = await fetch(url);
-            const data = await response.json();
-
-            const path = data.paths[0];
-
-            return {
-                coords: decodePolyline(path.points),
-                distance: path.distance,
-                time: path.time
-            };
         }
 
-        // ----- APP PRINCIPALE -----
         let map = L.map("map").setView([45.5017, -73.5673], 13);
 
         L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
@@ -139,37 +137,28 @@
         let routeAvant = null;
         let routeApres = null;
 
-        // Exemple de points
         const start = { lat: 45.501, lng: -73.567 };
-        const end   = { lat: 45.515, lng: -73.56 };
+        const end = { lat: 45.515, lng: -73.56 };
 
-        // ----- Bouton AVANT -----
-        document.getElementById("avantBtn").addEventListener("click", async () => {
+        document.getElementById("avantBtn").onclick = async () => {
             if (routeAvant) map.removeLayer(routeAvant);
 
             const route = await getRoute([start, end]);
+            if (!route) return;
 
-            routeAvant = L.polyline(route.coords, {
-                color: "#0059ff",
-                weight: 5
-            }).addTo(map);
+            routeAvant = L.polyline(route.coords, { color: "blue", weight: 4 }).addTo(map);
+            map.fitBounds(routeAvant.getBounds());
+        };
 
-            map.fitBounds(routeAvant.getBounds(), { padding: [50, 50] });
-        });
-
-        // ----- Bouton APRES -----
-        document.getElementById("apresBtn").addEventListener("click", async () => {
+        document.getElementById("apresBtn").onclick = async () => {
             if (routeApres) map.removeLayer(routeApres);
 
             const route = await getRoute([start, end], true);
+            if (!route) return;
 
-            routeApres = L.polyline(route.coords, {
-                color: "#ff2d2d",
-                weight: 5
-            }).addTo(map);
-
-            map.fitBounds(routeApres.getBounds(), { padding: [50, 50] });
-        });
+            routeApres = L.polyline(route.coords, { color: "red", weight: 4 }).addTo(map);
+            map.fitBounds(routeApres.getBounds());
+        };
     </script>
 
 </body>
