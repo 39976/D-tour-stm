@@ -1,118 +1,176 @@
-<script>
-const API_KEY = "87a97ff3-8371-4f51-a54d-79f0d8f9fa48";
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Détours STM – v3.2</title>
 
-let map = L.map("map").setView([45.52, -73.57], 12);
-L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png").addTo(map);
+    <!-- Leaflet -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css"/>
+    <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
 
-let start = null, end = null;
-let m1 = null, m2 = null, routeLayer = null;
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            font-family: "Inter", sans-serif;
+        }
 
-// Snap sur route GRAPHOPPER (pas OSM)
-async function snap(lat, lng) {
-  const url =
-    `https://graphhopper.com/api/1/route?point=${lat},${lng}&point=${lat+0.0001},${lng+0.0001}` +
-    `&vehicle=car&key=${API_KEY}&locale=fr&point_hint=street`;
+        #map {
+            height: 100vh;
+            width: 100vw;
+        }
 
-  let r = await (await fetch(url)).json();
-  if (r.paths && r.paths[0] && r.paths[0].snapped_waypoints) {
-    let p = r.paths[0].snapped_waypoints.coordinates[0];
-    return { lat: p[1], lng: p[0] };
-  }
-  return { lat, lng };
-}
+        /* Floating action buttons */
+        #floating-actions {
+            position: fixed;
+            bottom: 25px;
+            right: 20px;
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
 
-// Calcul du rectangle parfaitement parallèle à la rue
-function buildBlockArea(s, e) {
-  let dx = e.lng - s.lng;
-  let dy = e.lat - s.lat;
+        .fab {
+            background: white;
+            padding: 12px 18px;
+            border: none;
+            border-radius: 12px;
+            font-size: 15px;
+            font-weight: bold;
+            box-shadow: 0 4px 10px rgba(0,0,0,0.25);
+            cursor: pointer;
+        }
 
-  let len = Math.sqrt(dx*dx + dy*dy);
-  dx /= len;
-  dy /= len;
+        .fab-red {
+            background: #ff4d4d;
+            color: white;
+        }
 
-  let w = 0.00020; // largeur 20m
-  let l = 0.00010; // long côté
+        .fab:active {
+            transform: scale(0.95);
+        }
+    </style>
+</head>
 
-  let p1 = [s.lat + dy*w, s.lng - dx*w];
-  let p2 = [s.lat - dy*w, s.lng + dx*w];
-  let p3 = [e.lat - dy*w, e.lng + dx*w];
-  let p4 = [e.lat + dy*w, e.lng - dx*w];
+<body>
 
-  return `${p1.join(",")};${p2.join(",")};${p3.join(",")};${p4.join(",")};${p1.join(",")}`;
-}
+    <div id="map"></div>
 
-function updateChips() {
-  let chip = "";
-  if (start) chip += `<span class="chip">AVANT : ${start.lat.toFixed(5)}, ${start.lng.toFixed(5)}</span>`;
-  if (end) chip += `<span class="chip">APRÈS : ${end.lat.toFixed(5)}, ${end.lng.toFixed(5)}</span>`;
-  document.getElementById("chips").innerHTML = chip;
+    <!-- Buttons -->
+    <div id="floating-actions">
+        <button class="fab" id="avantBtn">Avant</button>
+        <button class="fab fab-red" id="apresBtn">Après</button>
+    </div>
 
-  document.getElementById("btn").disabled = !(start && end);
-}
+    <script>
+        // ----- UTILITAIRE : Décodage polyline GraphHopper -----
+        function decodePolyline(encoded) {
+            let coords = [];
+            let index = 0, lat = 0, lng = 0;
 
-map.on("click", async e => {
-  let p = await snap(e.latlng.lat, e.latlng.lng);
+            while (index < encoded.length) {
+                let b, shift = 0, result = 0;
+                do {
+                    b = encoded.charCodeAt(index++) - 63;
+                    result |= (b & 0x1f) << shift;
+                    shift += 5;
+                } while (b >= 0x20);
+                let dlat = (result & 1) ? ~(result >> 1) : (result >> 1);
+                lat += dlat;
 
-  if (!start) {
-    start = p;
-    if (m1) map.removeLayer(m1);
-    m1 = L.marker(start).addTo(map);
-  } else if (!end) {
-    end = p;
-    if (m2) map.removeLayer(m2);
-    m2 = L.marker(end).addTo(map);
-  } else {
-    start = p;
-    end = null;
-    if (m1) map.removeLayer(m1);
-    if (m2) map.removeLayer(m2);
-    m1 = L.marker(start).addTo(map);
-  }
+                shift = 0;
+                result = 0;
+                do {
+                    b = encoded.charCodeAt(index++) - 63;
+                    result |= (b & 0x1f) << shift;
+                    shift += 5;
+                } while (b >= 0x20);
+                let dlng = (result & 1) ? ~(result >> 1) : (result >> 1);
+                lng += dlng;
 
-  updateChips();
-});
+                coords.push([lat / 1e5, lng / 1e5]);
+            }
 
-// CALCUL
-async function calc() {
-  document.getElementById("status").innerHTML = "Calcul du détour…";
+            return coords;
+        }
 
-  let block = buildBlockArea(start, end);
+        // ----- APPEL API GRAPHHOPPER -----
+        const API_KEY = "TA_CLE_ICI";
 
-  let url =
-    `https://graphhopper.com/api/1/route?` +
-    `point=${start.lat},${start.lng}&point=${end.lat},${end.lng}` +
-    `&vehicle=car&locale=fr&instructions=true&calc_points=true` +
-    `&block_area=${block}` +
-    `&key=${API_KEY}`;
+        async function getRoute(points, isAfter = false) {
+            let url =
+                "https://graphhopper.com/api/1/route?" +
+                "key=" + API_KEY +
+                "&vehicle=car" +
+                "&locale=fr" +
+                "&instructions=true" +
+                "&points_encoded=true" +
+                "&ch.disable=true"; // permet modifications
 
-  let r = await fetch(url);
-  let data = await r.json();
+            for (let p of points) {
+                url += `&point=${p.lat},${p.lng}`;
+            }
 
-  if (!data.paths || !data.paths.length) {
-    document.getElementById("status").innerHTML =
-      "<span style='color:red;'>Impossible de calculer un détour</span>";
-    return;
-  }
+            if (isAfter) {
+                // Voici où tu ajouteras block_area en v4.0
+                // url += "&block_area=45.502,-73.565,45.503,-73.566";
+            }
 
-  let path = data.paths[0];
+            const response = await fetch(url);
+            const data = await response.json();
 
-  if (routeLayer) map.removeLayer(routeLayer);
-  routeLayer = L.polyline(
-    path.points.coordinates.map(c => [c[1], c[0]]),
-    { color:"blue", weight:5 }
-  ).addTo(map);
+            const path = data.paths[0];
 
-  map.fitBounds(routeLayer.getBounds());
+            return {
+                coords: decodePolyline(path.points),
+                distance: path.distance,
+                time: path.time
+            };
+        }
 
-  // Affichage étapes
-  let steps = path.instructions
-    .map(i => `<li>${i.text} (${i.distance} m)</li>`)
-    .join("");
+        // ----- APP PRINCIPALE -----
+        let map = L.map("map").setView([45.5017, -73.5673], 13);
 
-  document.getElementById("steps").innerHTML = `<ul>${steps}</ul>`;
-  document.getElementById("status").innerHTML = "";
-}
+        L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
+            maxZoom: 19
+        }).addTo(map);
 
-document.getElementById("btn").onclick = calc;
-document.getElementById("reset").onclick = () => location.reload();
-</script>
+        let routeAvant = null;
+        let routeApres = null;
+
+        // Exemple de points
+        const start = { lat: 45.501, lng: -73.567 };
+        const end   = { lat: 45.515, lng: -73.56 };
+
+        // ----- Bouton AVANT -----
+        document.getElementById("avantBtn").addEventListener("click", async () => {
+            if (routeAvant) map.removeLayer(routeAvant);
+
+            const route = await getRoute([start, end]);
+
+            routeAvant = L.polyline(route.coords, {
+                color: "#0059ff",
+                weight: 5
+            }).addTo(map);
+
+            map.fitBounds(routeAvant.getBounds(), { padding: [50, 50] });
+        });
+
+        // ----- Bouton APRES -----
+        document.getElementById("apresBtn").addEventListener("click", async () => {
+            if (routeApres) map.removeLayer(routeApres);
+
+            const route = await getRoute([start, end], true);
+
+            routeApres = L.polyline(route.coords, {
+                color: "#ff2d2d",
+                weight: 5
+            }).addTo(map);
+
+            map.fitBounds(routeApres.getBounds(), { padding: [50, 50] });
+        });
+    </script>
+
+</body>
+</html>
