@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Détours STM – v3.2</title>
+    <title>Détours STM – FIXED</title>
 
     <!-- Leaflet -->
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
@@ -14,22 +14,27 @@
             margin: 0;
             padding: 0;
             font-family: Arial, sans-serif;
+            overflow: hidden;
         }
 
+        /* La carte doit être EN DESSOUS */
         #map {
             height: 100vh;
             width: 100vw;
+            z-index: 1 !important;
+            position: relative !important;
         }
 
-        /* --- Boutons flottants (CORRIGÉ) --- */
+        /* Les boutons doivent rester EN AVANT */
         #floating-actions {
             position: fixed !important;
             bottom: 25px !important;
             right: 20px !important;
-            z-index: 9999 !important;
+            z-index: 999999 !important;
             display: flex !important;
             flex-direction: column !important;
             gap: 12px !important;
+            pointer-events: auto !important;
         }
 
         .fab {
@@ -39,17 +44,14 @@
             border: none;
             font-size: 15px;
             font-weight: bold;
-            box-shadow: 0 4px 10px rgba(0,0,0,0.25);
+            box-shadow: 0 4px 10px rgba(0,0,0,0.3);
             cursor: pointer;
+            z-index: 999999 !important;
         }
 
         .fab-red {
             background: #ff4d4d;
             color: white;
-        }
-
-        .fab:active {
-            transform: scale(0.95);
         }
     </style>
 </head>
@@ -64,7 +66,6 @@
     </div>
 
     <script>
-        /* --- Décodage polyline GraphHopper --- */
         function decodePolyline(encoded) {
             let coords = [];
             let index = 0, lat = 0, lng = 0;
@@ -95,11 +96,11 @@
 
                 coords.push([lat / 1e5, lng / 1e5]);
             }
+
             return coords;
         }
 
-        /* --- APPEL API GRAPHHOPPER --- */
-        const API_KEY = "TA_CLE_ICI";  /* ← METS TA CLÉ ICI */
+        const API_KEY = "TA_CLE_ICI"; /* Mets ta clé ici */
 
         async function getRoute(points) {
             let url = "https://graphhopper.com/api/1/route?";
@@ -114,25 +115,17 @@
                 url += `&point=${p.lat},${p.lng}`;
             });
 
-            try {
-                const res = await fetch(url);
-                const data = await res.json();
+            const res = await fetch(url);
+            const data = await res.json();
 
-                if (!data.paths || !data.paths[0]) {
-                    alert("Erreur: aucun chemin trouvé.");
-                    return null;
-                }
-
-                return decodePolyline(data.paths[0].points);
-
-            } catch (err) {
-                alert("Erreur API GraphHopper");
-                console.error(err);
+            if (!data.paths || !data.paths[0]) {
+                alert("Aucun chemin trouvé");
                 return null;
             }
+
+            return decodePolyline(data.paths[0].points);
         }
 
-        /* --- CARTE LEAFLET --- */
         let map = L.map("map").setView([45.5017, -73.5673], 13);
 
         L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
@@ -142,11 +135,9 @@
         let routeAvant = null;
         let routeApres = null;
 
-        /* Points exemple Montréal */
         const start = { lat: 45.501, lng: -73.567 };
         const end   = { lat: 45.515, lng: -73.56 };
 
-        /* --- Bouton AVANT --- */
         document.getElementById("avantBtn").onclick = async () => {
             if (routeAvant) map.removeLayer(routeAvant);
 
@@ -157,7 +148,6 @@
             map.fitBounds(routeAvant.getBounds());
         };
 
-        /* --- Bouton APRÈS (même tracé pour l’instant) --- */
         document.getElementById("apresBtn").onclick = async () => {
             if (routeApres) map.removeLayer(routeApres);
 
