@@ -21,14 +21,15 @@
             width: 100vw;
         }
 
+        /* --- Boutons flottants (CORRIGÉ) --- */
         #floating-actions {
-            position: fixed;
-            bottom: 25px;
-            right: 20px;
-            display: flex;
-            flex-direction: column;
-            gap: 12px;
-            z-index: 1000;
+            position: fixed !important;
+            bottom: 25px !important;
+            right: 20px !important;
+            z-index: 9999 !important;
+            display: flex !important;
+            flex-direction: column !important;
+            gap: 12px !important;
         }
 
         .fab {
@@ -46,6 +47,10 @@
             background: #ff4d4d;
             color: white;
         }
+
+        .fab:active {
+            transform: scale(0.95);
+        }
     </style>
 </head>
 
@@ -59,6 +64,7 @@
     </div>
 
     <script>
+        /* --- Décodage polyline GraphHopper --- */
         function decodePolyline(encoded) {
             let coords = [];
             let index = 0, lat = 0, lng = 0;
@@ -92,9 +98,10 @@
             return coords;
         }
 
-        const API_KEY = "TA_CLE_ICI";
+        /* --- APPEL API GRAPHHOPPER --- */
+        const API_KEY = "TA_CLE_ICI";  /* ← METS TA CLÉ ICI */
 
-        async function getRoute(points, detour = false) {
+        async function getRoute(points) {
             let url = "https://graphhopper.com/api/1/route?";
             url += "key=" + API_KEY;
             url += "&vehicle=car";
@@ -108,26 +115,24 @@
             });
 
             try {
-                const response = await fetch(url);
-                const data = await response.json();
+                const res = await fetch(url);
+                const data = await res.json();
 
                 if (!data.paths || !data.paths[0]) {
-                    alert("Erreur GraphHopper: aucun chemin trouvé");
+                    alert("Erreur: aucun chemin trouvé.");
                     return null;
                 }
 
-                return {
-                    coords: decodePolyline(data.paths[0].points),
-                    distance: data.paths[0].distance,
-                    time: data.paths[0].time
-                };
-            } catch (e) {
-                alert("Erreur API");
-                console.error(e);
+                return decodePolyline(data.paths[0].points);
+
+            } catch (err) {
+                alert("Erreur API GraphHopper");
+                console.error(err);
                 return null;
             }
         }
 
+        /* --- CARTE LEAFLET --- */
         let map = L.map("map").setView([45.5017, -73.5673], 13);
 
         L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
@@ -137,26 +142,29 @@
         let routeAvant = null;
         let routeApres = null;
 
+        /* Points exemple Montréal */
         const start = { lat: 45.501, lng: -73.567 };
-        const end = { lat: 45.515, lng: -73.56 };
+        const end   = { lat: 45.515, lng: -73.56 };
 
+        /* --- Bouton AVANT --- */
         document.getElementById("avantBtn").onclick = async () => {
             if (routeAvant) map.removeLayer(routeAvant);
 
-            const route = await getRoute([start, end]);
-            if (!route) return;
+            const coords = await getRoute([start, end]);
+            if (!coords) return;
 
-            routeAvant = L.polyline(route.coords, { color: "blue", weight: 4 }).addTo(map);
+            routeAvant = L.polyline(coords, { color: "blue", weight: 4 }).addTo(map);
             map.fitBounds(routeAvant.getBounds());
         };
 
+        /* --- Bouton APRÈS (même tracé pour l’instant) --- */
         document.getElementById("apresBtn").onclick = async () => {
             if (routeApres) map.removeLayer(routeApres);
 
-            const route = await getRoute([start, end], true);
-            if (!route) return;
+            const coords = await getRoute([start, end]);
+            if (!coords) return;
 
-            routeApres = L.polyline(route.coords, { color: "red", weight: 4 }).addTo(map);
+            routeApres = L.polyline(coords, { color: "red", weight: 4 }).addTo(map);
             map.fitBounds(routeApres.getBounds());
         };
     </script>
