@@ -2,7 +2,7 @@
 <html lang="fr">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta-name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Détours STM – FIXED</title>
 
     <!-- Leaflet -->
@@ -17,7 +17,6 @@
             overflow: hidden;
         }
 
-        /* La carte doit être EN DESSOUS */
         #map {
             height: 100vh;
             width: 100vw;
@@ -25,7 +24,6 @@
             position: relative !important;
         }
 
-        /* Les boutons doivent rester EN AVANT */
         #floating-actions {
             position: fixed !important;
             bottom: 25px !important;
@@ -34,7 +32,6 @@
             display: flex !important;
             flex-direction: column !important;
             gap: 12px !important;
-            pointer-events: auto !important;
         }
 
         .fab {
@@ -46,7 +43,6 @@
             font-weight: bold;
             box-shadow: 0 4px 10px rgba(0,0,0,0.3);
             cursor: pointer;
-            z-index: 999999 !important;
         }
 
         .fab-red {
@@ -100,7 +96,8 @@
             return coords;
         }
 
-        const API_KEY = "TA_CLE_ICI"; /* Mets ta clé ici */
+        /* ⭐ TA CLÉ API INSÉRÉE ICI ⭐ */
+        const API_KEY = "87a97ff3-8371-4f51-a54d-79f0d8f9fa48";
 
         async function getRoute(points) {
             let url = "https://graphhopper.com/api/1/route?";
