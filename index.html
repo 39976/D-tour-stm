@@ -2,7 +2,7 @@
 <html lang="fr">
 <head>
     <meta charset="UTF-8">
-    <meta-name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Détours STM – FIXED</title>
 
     <!-- Leaflet -->
@@ -20,18 +20,16 @@
         #map {
             height: 100vh;
             width: 100vw;
-            z-index: 1 !important;
-            position: relative !important;
         }
 
         #floating-actions {
-            position: fixed !important;
-            bottom: 25px !important;
-            right: 20px !important;
-            z-index: 999999 !important;
-            display: flex !important;
-            flex-direction: column !important;
-            gap: 12px !important;
+            position: fixed;
+            bottom: 25px;
+            right: 20px;
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+            z-index: 9999;
         }
 
         .fab {
@@ -96,17 +94,19 @@
             return coords;
         }
 
-        /* ⭐ TA CLÉ API INSÉRÉE ICI ⭐ */
+        /* ⭐ TA CLÉ API ⭐ */
         const API_KEY = "87a97ff3-8371-4f51-a54d-79f0d8f9fa48";
 
         async function getRoute(points) {
-            let url = "https://graphhopper.com/api/1/route?";
-            url += "key=" + API_KEY;
-            url += "&vehicle=car";
-            url += "&locale=fr";
-            url += "&points_encoded=true";
-            url += "&instructions=false";
-            url += "&ch.disable=true";
+            let url =
+                "https://graphhopper.com/api/1/route?" +
+                "key=" + API_KEY +
+                "&vehicle=car" +
+                "&profile=car" +               /* ⭐ OBLIGATOIRE pour éviter "Aucun chemin" */
+                "&locale=fr" +
+                "&points_encoded=true" +
+                "&instructions=false" +
+                "&ch.disable=true";
 
             points.forEach(p => {
                 url += `&point=${p.lat},${p.lng}`;
@@ -117,6 +117,7 @@
 
             if (!data.paths || !data.paths[0]) {
                 alert("Aucun chemin trouvé");
+                console.log("Réponse GraphHopper :", data);
                 return null;
             }
 
