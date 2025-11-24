@@ -3,12 +3,13 @@
 <head>
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 
+<!-- LEAFLET -->
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 
 <style>
     body { margin:0; padding:0; }
-    #map { width:100%; height:90vh; background:#eee; }
+    #map { width:100%; height:90vh; }
     #panel {
         background:white;
         padding:10px;
@@ -35,20 +36,23 @@
 <body>
 
 <div id="panel">
-    Ligne bus : <input id="bus" placeholder="186">
-    <button onclick="resetDetour()">Effacer détour</button><br><br>
-    1er clic = début de l’entrave — 2e clic = fin → calcul du détour
+    Ligne bus :
+    <input id="bus" placeholder="186">
+    <button onclick="resetDetour()">Effacer détour</button>
+    <br><br>
+    1er clic : début du détour — 2e clic : fin → calcul automatique
 </div>
 
 <div id="map"></div>
 
 <script>
-// ---- TA CLÉ API ----
+
+// 👉 TA CLÉ API (installée définitivement)
 const API_KEY = "1adf955d-015a-43ae-a58b-0e3c04d6a8d4";
 
-// ---- Init carte ----
 let map = L.map('map').setView([45.55, -73.55], 14);
 
+// 👉 Chargement du fond de carte
 L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
     maxZoom: 20
 }).addTo(map);
@@ -57,45 +61,35 @@ let click1 = null;
 let click2 = null;
 let marker1 = null;
 let marker2 = null;
-let detourLine = null;
+let routeLine = null;
 
-// ---- CLICS ----
+// 👉 CLIC SUR LA CARTE
 map.on("click", function(e) {
+
     if (!click1) {
         click1 = e.latlng;
-        marker1 = L.marker(click1).addTo(map)
-                   .bindPopup("Début de l’entrave").openPopup();
+        marker1 = L.marker(click1).addTo(map);
+        return;
     }
-    else if (!click2) {
+
+    if (!click2) {
         click2 = e.latlng;
-        marker2 = L.marker(click2).addTo(map)
-                   .bindPopup("Fin de l’entrave").openPopup();
+        marker2 = L.marker(click2).addTo(map);
         calculDetour();
     }
 });
 
-// ---- RESET ----
+// 👉 RESET
 function resetDetour() {
-    click1 = click2 = null;
-    if (marker1) map.removeLayer(marker1);
-    if (marker2) map.removeLayer(marker2);
-    if (detourLine) map.removeLayer(detourLine);
+    click1 = null;
+    click2 = null;
+    if (marker1) { map.removeLayer(marker1); }
+    if (marker2) { map.removeLayer(marker2); }
+    if (routeLine) { map.removeLayer(routeLine); }
 }
 
-// ---- CALCUL DÉTOUR (évite segment entravé) ----
+// 👉 CALCUL DU DÉTOUR
 async function calculDetour() {
-
-    // on construit une "zone interdite" autour de l’entrave
-    const forbidden = {
-        type: "Feature",
-        geometry: {
-            type: "LineString",
-            coordinates: [
-                [click1.lng, click1.lat],
-                [click2.lng, click2.lat]
-            ]
-        }
-    };
 
     const url = `https://graphhopper.com/api/1/route?key=${API_KEY}`;
 
@@ -104,36 +98,31 @@ async function calculDetour() {
         points: [
             [click1.lng, click1.lat],
             [click2.lng, click2.lat]
-        ],
-        avoid_polygons: {
-            type: "FeatureCollection",
-            features: [forbidden]
-        }
+        ]
     };
 
     const response = await fetch(url, {
         method: "POST",
-        headers: {"Content-Type": "application/json"},
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body)
     });
 
     const data = await response.json();
 
-    if (!data.paths) {
-        alert("Erreur GraphHopper.");
-        return;
-    }
-
-    if (data.paths.length === 0) {
-        alert("Aucun détour possible.");
+    if (!data.paths || data.paths.length === 0) {
+        alert("Aucun chemin trouvé.");
         return;
     }
 
     const pts = data.paths[0].points.coordinates.map(p => [p[1], p[0]]);
 
-    detourLine = L.polyline(pts, {color:"red", weight:6}).addTo(map);
-    map.fitBounds(detourLine.getBounds());
+    if (routeLine) { map.removeLayer(routeLine); }
+
+    routeLine = L.polyline(pts, {color:"red", weight:5}).addTo(map);
+
+    map.fitBounds(routeLine.getBounds());
 }
+
 </script>
 
 </body>
