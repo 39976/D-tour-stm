@@ -1,112 +1,132 @@
+
 <!DOCTYPE html>
 <html lang="fr">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Détours STM – Click A → Click B</title>
+<title>Détours STM</title>
 
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 
 <style>
-    body { margin:0; padding:0; }
-    #map { height:100vh; width:100vw; }
-    #info {
-        position:fixed; bottom:20px; left:20px;
-        background:white; padding:10px 15px;
-        border-radius:10px; box-shadow:0 3px 10px rgba(0,0,0,0.3);
-        font-size:16px; z-index:9999;
-    }
+body {
+    margin: 0;
+    padding: 0;
+    font-family: Arial;
+}
+#map {
+    width: 100vw;
+    height: 100vh;
+}
+#panel {
+    position: fixed;
+    top: 10px;
+    left: 10px;
+    background: white;
+    padding: 10px;
+    border-radius: 10px;
+    z-index: 2000;
+    box-shadow: 0 3px 10px rgba(0,0,0,0.3);
+}
+button {
+    padding: 8px 14px;
+    margin-left: 8px;
+    border-radius: 8px;
+    border: none;
+}
 </style>
-</head>
 
+</head>
 <body>
 
+<div id="panel">
+    <label>Ligne bus :</label>
+    <input id="busLine" placeholder="186">
+    <button onclick="clearDetour()">Effacer détour</button>
+    <p>1er clic : début de l'entrave<br>2e clic : fin de l'entrave → calcul</p>
+</div>
+
 <div id="map"></div>
-<div id="info">Clique un point A sur la carte</div>
 
 <script>
-const API_KEY = "1adf955d-015a-43ae-a58b-0e3c04d6a8d4";
+const API_KEY = "1adf955d-015a-43ae-a58b-0e3c04d6a8d4";  // ✔ intégrée
 
-let map = L.map("map").setView([45.55, -73.65], 12);
-L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom:19 }).addTo(map);
+let map = L.map("map").setView([45.55, -73.6], 13);
+L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png").addTo(map);
 
-let pointA = null;
-let pointB = null;
-let markerA = null;
-let markerB = null;
-let routeLine = null;
+let markers = [];
+let polyline = null;
 
-function decodePolyline(encoded) {
-    let coords = [], index = 0, lat = 0, lng = 0;
-    while (index < encoded.length) {
+function decodePolyline(str) {
+    let coords = [];
+    let index = 0, lat = 0, lng = 0;
+
+    while (index < str.length) {
         let b, shift = 0, result = 0;
-        do { b = encoded.charCodeAt(index++) - 63; result |= (b & 0x1f) << shift; shift += 5; } while (b >= 0x20);
-        lat += (result & 1) ? ~(result >> 1) : (result >> 1);
-        shift = 0; result = 0;
-        do { b = encoded.charCodeAt(index++) - 63; result |= (b & 0x1f) << shift; shift += 5; } while (b >= 0x20);
-        lng += (result & 1) ? ~(result >> 1) : (result >> 1);
+        do {
+            b = str.charCodeAt(index++) - 63;
+            result |= (b & 0x1f) << shift;
+            shift += 5;
+        } while (b >= 0x20);
+        let dlat = (result & 1) ? ~(result >> 1) : (result >> 1);
+        lat += dlat;
+
+        shift = 0;
+        result = 0;
+        do {
+            b = str.charCodeAt(index++) - 63;
+            result |= (b & 0x1f) << shift;
+            shift += 5;
+        } while (b >= 0x20);
+        let dlng = (result & 1) ? ~(result >> 1) : (result >> 1);
+        lng += dlng;
+
         coords.push([lat / 1e5, lng / 1e5]);
     }
     return coords;
 }
 
-async function getRoute(A, B) {
-    let url =
-        "https://graphhopper.com/api/1/route?" +
-        "key=" + API_KEY +
-        "&vehicle=car" +
-        "&profile=car" +
-        "&locale=fr" +
-        "&points_encoded=true" +
-        "&instructions=false" +
-        "&point=" + A.lat + "," + A.lng +
-        "&point=" + B.lat + "," + B.lng;
+async function calcRoute(p1, p2) {
+    const url =
+        `https://graphhopper.com/api/1/route?key=${API_KEY}` +
+        `&vehicle=car&points_encoded=true&instructions=false` +
+        `&point=${p1.lat},${p1.lng}&point=${p2.lat},${p2.lng}`;
 
     const res = await fetch(url);
     const data = await res.json();
 
     if (!data.paths || !data.paths[0]) {
-        alert("Aucun chemin trouvé : " + JSON.stringify(data));
+        alert("Aucun chemin trouvé pour ce détour");
         return null;
     }
 
     return decodePolyline(data.paths[0].points);
 }
 
-map.on("click", async (e) => {
-    if (!pointA) {
-        pointA = e.latlng;
-        markerA = L.marker(pointA).addTo(map).bindPopup("A").openPopup();
-        document.getElementById("info").innerText = "Clique maintenant un point B";
-        return;
-    }
+map.on("click", async e => {
+    markers.push(L.marker(e.latlng).addTo(map));
 
-    if (!pointB) {
-        pointB = e.latlng;
-        markerB = L.marker(pointB).addTo(map).bindPopup("B").openPopup();
-        document.getElementById("info").innerText = "Calcul du détour…";
+    if (markers.length === 2) {
+        const start = markers[0].getLatLng();
+        const end   = markers[1].getLatLng();
 
-        let coords = await getRoute(pointA, pointB);
+        const coords = await calcRoute(start, end);
         if (!coords) return;
 
-        routeLine = L.polyline(coords, { color:"red", weight:5 }).addTo(map);
-        map.fitBounds(routeLine.getBounds());
-        document.getElementById("info").innerText = "Détour affiché. Tape pour recommencer.";
-        return;
+        if (polyline) map.removeLayer(polyline);
+
+        polyline = L.polyline(coords, {color: "red", weight: 4}).addTo(map);
+        map.fitBounds(polyline.getBounds());
     }
-
-    // Si on clique une 3e fois → reset
-    map.removeLayer(markerA);
-    map.removeLayer(markerB);
-    if (routeLine) map.removeLayer(routeLine);
-
-    pointA = pointB = null;
-    markerA = markerB = null;
-    routeLine = null;
-
-    document.getElementById("info").innerText = "Clique un point A sur la carte";
 });
+
+function clearDetour() {
+    markers.forEach(m => map.removeLayer(m));
+    markers = [];
+    if (polyline) map.removeLayer(polyline);
+}
+
 </script>
 
 </body>
