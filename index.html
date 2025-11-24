@@ -3,14 +3,14 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Détours STM – WORKING</title>
+    <title>Détours STM – Cliquer sur la carte</title>
 
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 
     <style>
-        body { margin: 0; padding: 0; font-family: Arial; }
-        #map { height: 100vh; width: 100vw; }
+        body { margin:0; padding:0; }
+        #map { height:100vh; width:100vw; }
 
         #floating-actions {
             position: fixed;
@@ -32,115 +32,138 @@
             box-shadow: 0 4px 10px rgba(0,0,0,0.3);
         }
 
-        .fab-red { background: #ff4d4d; color:white; }
+        .fab-red {
+            background: #ff4d4d;
+            color: white;
+        }
     </style>
 </head>
 
 <body>
 
-    <div id="map"></div>
+<div id="map"></div>
 
-    <div id="floating-actions">
-        <button class="fab" id="avantBtn">Avant</button>
-        <button class="fab fab-red" id="apresBtn">Après</button>
-    </div>
+<div id="floating-actions">
+    <button class="fab" id="avantBtn">Avant</button>
+    <button class="fab fab-red" id="apresBtn">Après</button>
+</div>
 
-    <script>
+<script>
 
-        function decodePolyline(encoded) {
-            let coords = [];
-            let index = 0, lat = 0, lng = 0;
+const API_KEY = "1adf955d-015a-43ae-a58b-0e3c04d6a8d4"; // TA CLÉ
 
-            while (index < encoded.length) {
-                let b, shift = 0, result = 0;
+// --- Decode Polyline ---
+function decodePolyline(encoded) {
+    let coords = [];
+    let index = 0, lat = 0, lng = 0;
 
-                do {
-                    b = encoded.charCodeAt(index++) - 63;
-                    result |= (b & 0x1f) << shift;
-                    shift += 5;
-                } while (b >= 0x20);
+    while (index < encoded.length) {
+        let b, shift = 0, result = 0;
+        do {
+            b = encoded.charCodeAt(index++) - 63;
+            result |= (b & 0x1f) << shift;
+            shift += 5;
+        } while (b >= 0x20);
+        let dlat = (result & 1) ? ~(result >> 1) : (result >> 1);
+        lat += dlat;
 
-                let dlat = (result & 1) ? ~(result >> 1) : (result >> 1);
-                lat += dlat;
+        shift = 0;
+        result = 0;
+        do {
+            b = encoded.charCodeAt(index++) - 63;
+            result |= (b & 0x1f) << shift;
+            shift += 5;
+        } while (b >= 0x20);
+        let dlng = (result & 1) ? ~(result >> 1) : (result >> 1);
+        lng += dlng;
 
-                shift = 0; result = 0;
+        coords.push([lat / 1e5, lng / 1e5]);
+    }
+    return coords;
+}
 
-                do {
-                    b = encoded.charCodeAt(index++) - 63;
-                    result |= (b & 0x1f) << shift;
-                    shift += 5;
-                } while (b >= 0x20);
+// --- ROUTING FUNCTION ---
+async function getRoute(points) {
 
-                let dlng = (result & 1) ? ~(result >> 1) : (result >> 1);
-                lng += dlng;
+    let url = "https://graphhopper.com/api/1/route?";
+    url += "key=" + API_KEY;
+    url += "&profile=car";
+    url += "&locale=fr";
+    url += "&points_encoded=true";
+    url += "&instructions=false";
 
-                coords.push([lat / 1e5, lng / 1e5]);
-            }
+    points.forEach(p => {
+        url += `&point=${p.lat},${p.lng}`;
+    });
 
-            return coords;
-        }
+    const res = await fetch(url);
+    const data = await res.json();
 
-        const API_KEY = "1adf955d-015a-43ae-a58b-0e3c04d6a8d4";
+    if (!data.paths || !data.paths[0]) {
+        alert("Aucun chemin trouvé");
+        return null;
+    }
 
-        async function getRoute(points) {
-            let url =
-                "https://graphhopper.com/api/1/route?" +
-                "key=" + API_KEY +
-                "&vehicle=car" +
-                "&profile=car" +
-                "&locale=fr" +
-                "&points_encoded=true" +
-                "&instructions=false";
+    return decodePolyline(data.paths[0].points);
+}
 
-            points.forEach(p => {
-                url += `&point=${p.lat},${p.lng}`;
-            });
+// --- LEAFLET MAP ---
+let map = L.map("map").setView([45.51, -73.56], 13);
 
-            const res = await fetch(url);
-            const data = await res.json();
+L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
+    maxZoom: 19
+}).addTo(map);
 
-            if (!data.paths || !data.paths[0]) {
-                alert("Aucun chemin trouvé");
-                console.log(data);
-                return null;
-            }
+let startMarker = null;
+let endMarker = null;
+let start = null;
+let end = null;
 
-            return decodePolyline(data.paths[0].points);
-        }
+let routeAvant = null;
+let routeApres = null;
 
-        let map = L.map("map").setView([45.5017, -73.5673], 13);
+// --- CLICK HANDLER ---
+map.on("click", (e) => {
+    if (!start) {
+        start = e.latlng;
+        startMarker = L.marker(start, {color:"green"}).addTo(map);
+    } 
+    else if (!end) {
+        end = e.latlng;
+        endMarker = L.marker(end, {color:"red"}).addTo(map);
+    } 
+    else {
+        alert("2 points déjà définis.\nRecharge la page pour recommencer.");
+    }
+});
 
-        L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
-            maxZoom: 19
-        }).addTo(map);
+// --- AVANT ---
+document.getElementById("avantBtn").onclick = async () => {
+    if (!start || !end) { alert("Tape 2 points sur la carte d'abord !"); return; }
 
-        let routeAvant = null;
-        let routeApres = null;
+    if (routeAvant) map.removeLayer(routeAvant);
 
-        const start = { lat: 45.501, lng: -73.567 };
-        const end   = { lat: 45.515, lng: -73.56 };
+    const coords = await getRoute([ start, end ]);
+    if (!coords) return;
 
-        document.getElementById("avantBtn").onclick = async () => {
-            if (routeAvant) map.removeLayer(routeAvant);
+    routeAvant = L.polyline(coords, { color: "blue", weight: 4 }).addTo(map);
+    map.fitBounds(routeAvant.getBounds());
+};
 
-            const coords = await getRoute([start, end]);
-            if (!coords) return;
+// --- APRES ---
+document.getElementById("apresBtn").onclick = async () => {
+    if (!start || !end) { alert("Tape 2 points sur la carte d'abord !"); return; }
 
-            routeAvant = L.polyline(coords, { color: "blue", weight: 4 }).addTo(map);
-            map.fitBounds(routeAvant.getBounds());
-        };
+    if (routeApres) map.removeLayer(routeApres);
 
-        document.getElementById("apresBtn").onclick = async () => {
-            if (routeApres) map.removeLayer(routeApres);
+    const coords = await getRoute([ start, end ]);
+    if (!coords) return;
 
-            const coords = await getRoute([start, end]);
-            if (!coords) return;
+    routeApres = L.polyline(coords, { color: "red", weight: 4 }).addTo(map);
+    map.fitBounds(routeApres.getBounds());
+};
 
-            routeApres = L.polyline(coords, { color: "red", weight: 4 }).addTo(map);
-            map.fitBounds(routeApres.getBounds());
-        };
-
-    </script>
+</script>
 
 </body>
 </html>
