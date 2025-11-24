@@ -3,110 +3,104 @@
 <head>
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 
-<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 
 <style>
-    body { margin:0; padding:0; }
-    #map { width:100%; height:90vh; }
-    #panel {
-        background:white;
-        padding:10px;
-        font-size:18px;
-        border-bottom:2px solid #ccc;
-    }
+  body { margin:0; padding:0; }
+  #map { width:100%; height:90vh; }
+  #panel {
+      background:white;
+      padding:10px;
+      font-size:18px;
+      border-bottom:2px solid #ccc;
+  }
 </style>
 </head>
 
 <body>
 
 <div id="panel">
-    <b>Ligne bus :</b>
-    <input id="bus" placeholder="186">
-    <button onclick="resetDetour()">Effacer détour</button>
-    <br><br>
-    1er clic : début du détour — 2e clic : fin du détour → calcul
+  Ligne bus : <input id="bus" placeholder="186">
+  <button onclick="resetDetour()">Effacer détour</button>
+  <br><br>
+  1er clic = début de l’entrave — 2e clic = fin → calcul du détour
 </div>
 
 <div id="map"></div>
 
 <script>
 
-// clé GraphHopper
 const API_KEY = "1adf955d-015a-43ae-a58b-0e3c04d6a8d4";
 
-let map = L.map("map").setView([45.55, -73.55], 14);
+let map = L.map('map').setView([45.55, -73.55], 14);
+L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png").addTo(map);
 
-L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
-    maxZoom: 20
-}).addTo(map);
-
-let p1 = null;
-let p2 = null;
+let pt1 = null, pt2 = null;
 let m1 = null, m2 = null;
 let routeLine = null;
 
-map.on("click", e => {
-    if (!p1) {
-        p1 = e.latlng;
-        m1 = L.marker(p1).addTo(map);
+map.on("click", (e) => {
+    if (!pt1) {
+        pt1 = e.latlng;
+        m1 = L.marker(pt1).addTo(map);
         return;
     }
-    if (!p2) {
-        p2 = e.latlng;
-        m2 = L.marker(p2).addTo(map);
+    if (!pt2) {
+        pt2 = e.latlng;
+        m2 = L.marker(pt2).addTo(map);
         calculDetour();
     }
 });
 
 function resetDetour() {
-    p1 = null;
-    p2 = null;
+    pt1 = pt2 = null;
     if (m1) map.removeLayer(m1);
     if (m2) map.removeLayer(m2);
     if (routeLine) map.removeLayer(routeLine);
 }
 
+// -------------------------------------
+//      CALCUL DU DÉTOUR (IMPORTANT)
+// -------------------------------------
 async function calculDetour() {
 
-    // rectangle interdit = segment de rue entre les deux points
-    const avoid = [
-        [
-            [p1.lng, p1.lat],
-            [p2.lng, p2.lat]
+    const block = {
+        type: "LineString",
+        coordinates: [
+            [pt1.lng, pt1.lat],
+            [pt2.lng, pt2.lat]
         ]
-    ];
-
-    const url = `https://graphhopper.com/api/1/route?key=${API_KEY}`;
+    };
 
     const body = {
         profile: "car",
         points: [
-            [p1.lng, p1.lat],
-            [p2.lng, p2.lat]
+            [pt1.lng, pt1.lat],
+            [pt2.lng, pt2.lat]
         ],
-        avoid_areas: avoid,
-        locale: "fr"
+        block_areas: [ block ]
     };
+
+    const url = `https://graphhopper.com/api/1/route?key=${API_KEY}`;
 
     const response = await fetch(url, {
         method: "POST",
-        headers: {"Content-Type":"application/json"},
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body)
     });
 
     const data = await response.json();
 
     if (!data.paths || data.paths.length === 0) {
-        alert("Aucun trajet trouvé pour ce détour.");
+        alert("Aucun chemin trouvé");
         return;
     }
 
-    const coords = data.paths[0].points.coordinates.map(pt => [pt[1], pt[0]]);
-
+    const pts = data.paths[0].points.coordinates.map(p => [p[1], p[0]]);
     if (routeLine) map.removeLayer(routeLine);
+    routeLine = L.polyline(pts, {color:"red", weight:5}).addTo(map);
 
-    routeLine = L.polyline(coords, {color:"red", weight:5}).addTo(map);
     map.fitBounds(routeLine.getBounds());
 }
 
