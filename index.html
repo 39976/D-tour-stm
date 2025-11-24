@@ -1,150 +1,92 @@
 <!DOCTYPE html>
-<html>
+<html lang="fr">
 <head>
+<meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 
+<title>Détour STM</title>
+
+<!-- Leaflet -->
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 
 <style>
-    body { margin:0; padding:0; }
-    #map { width:100%; height:90vh; }
-    #panel {
-        background:white;
-        padding:10px;
-        font-size:18px;
-        border-bottom:2px solid #ccc;
-    }
-    input {
-        font-size:18px;
-        padding:5px;
-        width:120px;
-    }
-    button {
-        background:#ff4444;
-        color:white;
-        padding:10px 15px;
-        font-size:18px;
-        border:none;
-        border-radius:8px;
-        margin-left:10px;
-    }
+  body { margin:0; padding:0; }
+  #map { width:100%; height:90vh; }
+  #panel {
+    background:white;
+    padding:10px;
+    font-size:18px;
+    border-bottom:2px solid #ccc;
+  }
+  input {
+    font-size:18px;
+    padding:5px;
+    width:120px;
+  }
+  button {
+    background:#ff4444;
+    color:white;
+    padding:10px 15px;
+    font-size:18px;
+    border:none;
+    border-radius:8px;
+    margin-left:10px;
+  }
 </style>
 </head>
 
 <body>
 
 <div id="panel">
-    Ligne bus :
-    <input id="bus" placeholder="186">
-    <button onclick="resetDetour()">Effacer détour</button>
-    <br><br>
-    1er clic : début du détour — 2e clic : fin → calcul automatique
+  Ligne bus :
+  <input id="bus" placeholder="186">
+  <button onclick="resetDetour()">Effacer détour</button>
+  <br><br>
+  1er clic : <b>début du détour</b> — 2e clic : <b>fin du détour</b> → calcul automatique
 </div>
 
 <div id="map"></div>
 
 <script>
-
-// clé API
+// ======= TA CLÉ API (déjà mise) =======
 const API_KEY = "1adf955d-015a-43ae-a58b-0e3c04d6a8d4";
 
+// ======= CARTE =======
 let map = L.map('map').setView([45.55, -73.55], 14);
-L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom: 20 }).addTo(map);
 
+L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+  maxZoom: 19,
+  attribution: '&copy; OpenStreetMap'
+}).addTo(map);
+
+// ======= VARIABLES GLOBALES =======
 let click1 = null;
 let click2 = null;
 let marker1 = null;
 let marker2 = null;
 let routeLine = null;
-let polygonAvoid = null;
 
-// click carte
-map.on("click", function(e) {
+// ======= CLIC SUR LA CARTE =======
+map.on("click", (e) => {
+  if (!click1) {
+    // premier clic = début du détour
+    click1 = e.latlng;
+    marker1 = L.marker(click1).addTo(map);
+    marker1.bindPopup("Début du détour").openPopup();
+    return;
+  }
 
-    if (!click1) {
-        click1 = e.latlng;
-        marker1 = L.marker(click1).addTo(map)
-                     .bindPopup("Début du détour").openPopup();
-        return;
-    }
-
-    if (!click2) {
-        click2 = e.latlng;
-        marker2 = L.marker(click2).addTo(map)
-                     .bindPopup("Fin du détour").openPopup();
-
-        calculDetour();
-    }
+  if (!click2) {
+    // deuxième clic = fin du détour
+    click2 = e.latlng;
+    marker2 = L.marker(click2).addTo(map);
+    marker2.bindPopup("Fin du détour").openPopup();
+    calculDetour();
+  }
 });
 
-// reset
+// ======= RESET =======
 function resetDetour() {
-    click1 = null;
-    click2 = null;
-    if (marker1) map.removeLayer(marker1);
-    if (marker2) map.removeLayer(marker2);
-    if (routeLine) map.removeLayer(routeLine);
-    if (polygonAvoid) map.removeLayer(polygonAvoid);
-}
-
-// calcul détour
-async function calculDetour() {
-
-    // on crée une zone rectangulaire autour de l’entrave
-    const poly = [
-        [click1.lat, click1.lng],
-        [click1.lat, click2.lng],
-        [click2.lat, click2.lng],
-        [click2.lat, click1.lng],
-        [click1.lat, click1.lng]
-    ];
-
-    polygonAvoid = L.polygon(poly, {color: "red"}).addTo(map);
-
-    const body = {
-        profile: "car",
-        points: [
-            [click1.lng, click1.lat],
-            [click2.lng, click2.lat]
-        ],
-        avoid_polygons: {
-            type: "FeatureCollection",
-            features: [
-                {
-                    type: "Feature",
-                    geometry: {
-                        type: "Polygon",
-                        coordinates: [ poly.map(p => [p[1], p[0]]) ]
-                    }
-                }
-            ]
-        }
-    };
-
-    const response = await fetch(`https://graphhopper.com/api/1/route?key=${API_KEY}`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body)
-    });
-
-    const data = await response.json();
-
-    if (!data.paths) {
-        alert("Aucun détour trouvé");
-        return;
-    }
-
-    const pts = data.paths[0].points.coordinates.map(p => [p[1], p[0]]);
-
-    if (routeLine) map.removeLayer(routeLine);
-
-    routeLine = L.polyline(pts, {color:"blue", weight:5}).addTo(map);
-
-    map.fitBounds(routeLine.getBounds());
-}
-
-</script>
-
-</body>
-</html>
+  click1 = null;
+  click
