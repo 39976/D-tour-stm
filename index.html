@@ -3,7 +3,6 @@
 <head>
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 
-<!-- LEAFLET -->
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 
@@ -16,114 +15,94 @@
         font-size:18px;
         border-bottom:2px solid #ccc;
     }
-    input {
-        font-size:18px;
-        padding:5px;
-        width:120px;
-    }
-    button {
-        background:#ff4444;
-        color:white;
-        padding:10px 15px;
-        font-size:18px;
-        border:none;
-        border-radius:8px;
-        margin-left:10px;
-    }
 </style>
 </head>
 
 <body>
 
 <div id="panel">
-    Ligne bus :
-    <input id="bus" placeholder="186">
-    <button onclick="resetDetour()">Effacer détour</button>
-    <br><br>
-    1er clic : début du détour — 2e clic : fin → calcul automatique
+    Ligne bus : <input id="bus" placeholder="186">
+    <button onclick="resetDetour()">Effacer détour</button><br>
+    1er clic = début — 2e clic = fin → détour automatique
 </div>
 
 <div id="map"></div>
 
 <script>
 
-// 👉 TA CLÉ API (installée définitivement)
 const API_KEY = "1adf955d-015a-43ae-a58b-0e3c04d6a8d4";
 
-let map = L.map('map').setView([45.55, -73.55], 14);
+let map = L.map('map').setView([45.55, -73.55], 15);
+L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",
+ { maxZoom: 20 }).addTo(map);
 
-// 👉 Chargement du fond de carte
-L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
-    maxZoom: 20
-}).addTo(map);
+let p1=null, p2=null;
+let m1=null, m2=null;
+let line=null;
 
-let click1 = null;
-let click2 = null;
-let marker1 = null;
-let marker2 = null;
-let routeLine = null;
-
-// 👉 CLIC SUR LA CARTE
-map.on("click", function(e) {
-
-    if (!click1) {
-        click1 = e.latlng;
-        marker1 = L.marker(click1).addTo(map);
-        return;
-    }
-
-    if (!click2) {
-        click2 = e.latlng;
-        marker2 = L.marker(click2).addTo(map);
+map.on("click", e => {
+    if (!p1) {
+        p1 = e.latlng;
+        m1 = L.marker(p1).addTo(map);
+    } else if (!p2) {
+        p2 = e.latlng;
+        m2 = L.marker(p2).addTo(map);
         calculDetour();
     }
 });
 
-// 👉 RESET
 function resetDetour() {
-    click1 = null;
-    click2 = null;
-    if (marker1) { map.removeLayer(marker1); }
-    if (marker2) { map.removeLayer(marker2); }
-    if (routeLine) { map.removeLayer(routeLine); }
+    p1=null; p2=null;
+    if (m1) map.removeLayer(m1);
+    if (m2) map.removeLayer(m2);
+    if (line) map.removeLayer(line);
 }
 
-// 👉 CALCUL DU DÉTOUR
 async function calculDetour() {
 
-    const url = `https://graphhopper.com/api/1/route?key=${API_KEY}`;
-
-    const body = {
-        profile: "car",
-        points: [
-            [click1.lng, click1.lat],
-            [click2.lng, click2.lat]
-        ]
+    // La "zone interdite" (l’entrave) → petit rectangle autour du segment
+    const avoid = {
+        type: "Polygon",
+        coordinates: [[
+            [p1.lng, p1.lat],
+            [p2.lng, p2.lat],
+            [p2.lng+0.0003, p2.lat+0.0003],
+            [p1.lng+0.0003, p1.lat+0.0003],
+            [p1.lng, p1.lat]
+        ]]
     };
 
-    const response = await fetch(url, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
+    let url = `https://graphhopper.com/api/1/route?key=${API_KEY}`;
+
+    let body = {
+        profile: "car",
+        points: [
+            [p1.lng, p1.lat],
+            [p2.lng, p2.lat]
+        ],
+        avoid_polygons: avoid
+    };
+
+    let rep = await fetch(url, {
+        method:"POST",
+        headers: { "Content-Type":"application/json" },
         body: JSON.stringify(body)
     });
 
-    const data = await response.json();
+    let data = await rep.json();
 
-    if (!data.paths || data.paths.length === 0) {
-        alert("Aucun chemin trouvé.");
+    if (!data.paths) {
+        alert("Impossible de calculer un détour");
         return;
     }
 
-    const pts = data.paths[0].points.coordinates.map(p => [p[1], p[0]]);
+    let pts = data.paths[0].points.coordinates.map(p=>[p[1],p[0]]);
 
-    if (routeLine) { map.removeLayer(routeLine); }
-
-    routeLine = L.polyline(pts, {color:"red", weight:5}).addTo(map);
-
-    map.fitBounds(routeLine.getBounds());
+    if (line) map.removeLayer(line);
+    line = L.polyline(pts, {color:"red", weight:5}).addTo(map);
+    map.fitBounds(line.getBounds());
 }
 
 </script>
-
 </body>
 </html>
