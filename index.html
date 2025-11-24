@@ -3,139 +3,242 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Détours STM – Détour simple</title>
+    <title>Détours STM</title>
 
     <!-- Leaflet -->
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 
     <style>
+        * {
+            box-sizing: border-box;
+        }
         body {
             margin: 0;
             padding: 0;
-            font-family: Arial, sans-serif;
+            font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
             overflow: hidden;
         }
 
-        #map {
-            height: 100vh;
-            width: 100vw;
-        }
-
-        /* Panneau en haut */
-        #panel {
+        #top-panel {
             position: fixed;
-            top: 10px;
-            left: 10px;
-            right: 10px;
+            top: 0;
+            left: 0;
+            right: 0;
             z-index: 1000;
-            background: white;
-            border-radius: 10px;
-            padding: 10px 14px;
-            box-shadow: 0 4px 10px rgba(0,0,0,0.3);
-            display: flex;
-            flex-direction: column;
-            gap: 6px;
+            background: rgba(255,255,255,0.95);
+            padding: 8px 12px;
+            box-shadow: 0 2px 6px rgba(0,0,0,0.2);
         }
 
-        #panel-top {
-            display: flex;
-            align-items: center;
-            gap: 8px;
-            flex-wrap: wrap;
+        #top-panel label {
+            font-weight: 600;
         }
 
-        label {
-            font-weight: bold;
+        #top-panel input {
+            padding: 4px 8px;
+            font-size: 16px;
+            width: 100px;
+            margin-right: 8px;
         }
 
-        input[type="text"] {
-            flex: 1;
-            padding: 6px 8px;
-            border-radius: 6px;
-            border: 1px solid #ccc;
-            font-size: 14px;
-        }
-
-        button {
-            border: none;
-            border-radius: 8px;
+        #top-panel button {
             padding: 6px 10px;
             font-size: 14px;
-            font-weight: bold;
-            cursor: pointer;
-        }
-
-        #btnClear {
-            background: #ff4d4d;
-            color: white;
-        }
-
-        #instructions {
-            font-size: 13px;
-        }
-
-        /* Boutons Avant / Après déjà existants */
-        #floating-actions {
-            position: fixed;
-            bottom: 25px;
-            right: 20px;
-            display: flex;
-            flex-direction: column;
-            gap: 12px;
-            z-index: 999;
-        }
-
-        .fab {
-            background: white;
-            padding: 12px 18px;
-            border-radius: 12px;
+            border-radius: 6px;
             border: none;
-            font-size: 15px;
-            font-weight: bold;
-            box-shadow: 0 4px 10px rgba(0,0,0,0.3);
             cursor: pointer;
+            font-weight: 600;
         }
 
-        .fab-red {
+        #btn-clear {
             background: #ff4d4d;
             color: white;
+        }
+
+        #help-text {
+            font-size: 13px;
+            margin-top: 6px;
+        }
+
+        /* La carte prend tout l’écran en-dessous du panneau */
+        #map {
+            position: absolute;
+            top: 90px;       /* hauteur approximative du panneau */
+            left: 0;
+            right: 0;
+            bottom: 0;
+        }
+
+        .leaflet-popup-content {
+            font-size: 13px;
         }
     </style>
 </head>
-
 <body>
 
-    <div id="map"></div>
-
-    <div id="panel">
-        <div id="panel-top">
-            <label for="ligneBus">Ligne bus :</label>
-            <input id="ligneBus" type="text" placeholder="Ex : 186">
-            <button id="btnClear">Effacer détour</button>
-        </div>
-        <div id="instructions">
-            1er clic sur la carte : <b>début du détour</b> – 
-            2e clic : <b>fin du détour</b> → calcul du trajet
-        </div>
+<div id="top-panel">
+    <div>
+        <label for="ligneBus">Ligne bus :</label>
+        <input id="ligneBus" type="text" placeholder="186">
+        <button id="btn-clear">Effacer détour</button>
     </div>
-
-    <div id="floating-actions">
-        <button class="fab" id="avantBtn">Avant</button>
-        <button class="fab fab-red" id="apresBtn">Après</button>
+    <div id="help-text">
+        1er clic sur la carte : <b>début de l'entrave</b> – 2e clic : <b>fin de l'entrave</b> → calcul du détour
     </div>
+</div>
 
-    <script>
-        // 🔑 Ta clé GraphHopper (mise une bonne fois pour toutes)
-        const API_KEY = "1adf955d-015a-43ae-a58b-0e3c04d6a8d4";
+<div id="map"></div>
 
-        function decodePolyline(encoded) {
-            let coords = [];
-            let index = 0, lat = 0, lng = 0;
+<script>
+    /******************************
+     *  CONFIG
+     ******************************/
+    const API_KEY = "1adf955d-015a-43ae-a58b-0e3c04d6a8d4"; // ← TA CLÉ, tu n'y touches plus 🙂
 
-            while (index < encoded.length) {
-                let b, shift = 0, result = 0;
+    /******************************
+     *  OUTILS GÉO
+     ******************************/
 
-                do {
-                    b = encoded.charCodeAt(index++) - 63;
-                    result |= (b & 0x1f)
+    // conversion approx. mètres -> degrés de latitude/longitude
+    function metersToDegrees(lat, dx, dy) {
+        const latRad = lat * Math.PI / 180;
+        const mPerDegLat = 111320;                 // ~m par degré de latitude
+        const mPerDegLon = 111320 * Math.cos(latRad);
+
+        return {
+            dLat: dy / mPerDegLat,
+            dLon: dx / mPerDegLon
+        };
+    }
+
+    // Construit un petit rectangle block_area autour du segment [A,B]
+    function buildBlockArea(a, b, widthMeters = 40) {
+        const latMid = (a.lat + b.lat) / 2;
+
+        // vecteur AB en mètres (approx) – on ne s’en sert que pour le vecteur perpendiculaire
+        const dx = (b.lng - a.lng) * 111320 * Math.cos(latMid * Math.PI/180);
+        const dy = (b.lat - a.lat) * 111320;
+
+        // vecteur perpendiculaire normalisé
+        const len = Math.sqrt(dx*dx + dy*dy) || 1;
+        const nx = -dy / len;
+        const ny = dx / len;
+
+        const off1 = metersToDegrees(latMid, nx * widthMeters, ny * widthMeters);
+        const off2 = metersToDegrees(latMid, -nx * widthMeters, -ny * widthMeters);
+
+        // 4 sommets du rectangle
+        const p1 = { lat: a.lat + off1.dLat, lng: a.lng + off1.dLon };
+        const p2 = { lat: b.lat + off1.dLat, lng: b.lng + off1.dLon };
+        const p3 = { lat: b.lat + off2.dLat, lng: b.lng + off2.dLon };
+        const p4 = { lat: a.lat + off2.dLat, lng: a.lng + off2.dLon };
+
+        // format pour block_area (lat,lon lat,lon ...)
+        return `${p1.lat},${p1.lng},${p2.lat},${p2.lng},${p3.lat},${p3.lng},${p4.lat},${p4.lng}`;
+    }
+
+    // décode la polyline GraphHopper
+    function decodePolyline(encoded) {
+        let coords = [];
+        let index = 0, lat = 0, lng = 0;
+
+        while (index < encoded.length) {
+            let b, shift = 0, result = 0;
+
+            do {
+                b = encoded.charCodeAt(index++) - 63;
+                result |= (b & 0x1f) << shift;
+                shift += 5;
+            } while (b >= 0x20);
+
+            let dlat = (result & 1) ? ~(result >> 1) : (result >> 1);
+            lat += dlat;
+
+            shift = 0;
+            result = 0;
+
+            do {
+                b = encoded.charCodeAt(index++) - 63;
+                result |= (b & 0x1f) << shift;
+                shift += 5;
+            } while (b >= 0x20);
+
+            let dlng = (result & 1) ? ~(result >> 1) : (result >> 1);
+            lng += dlng;
+
+            coords.push([lat / 1e5, lng / 1e5]);
+        }
+
+        return coords;
+    }
+
+    /******************************
+     *  APPEL GRAPHHOPPER
+     ******************************/
+
+    async function getRoute(points, extraParams = "") {
+        let url =
+            "https://graphhopper.com/api/1/route?" +
+            "key=" + API_KEY +
+            "&vehicle=car" +
+            "&profile=car" +
+            "&locale=fr" +
+            "&points_encoded=true" +
+            "&instructions=false" +
+            extraParams;   // ex: &block_area=...
+
+        points.forEach(p => {
+            url += `&point=${p.lat},${p.lng}`;
+        });
+
+        const res = await fetch(url);
+        const data = await res.json();
+
+        console.log("Réponse GraphHopper", data);
+
+        if (!data.paths || !data.paths[0]) {
+            return null;
+        }
+        return decodePolyline(data.paths[0].points);
+    }
+
+    /******************************
+     *  LEAFLET + LOGIQUE DÉTOUR
+     ******************************/
+
+    let map = L.map("map").setView([45.55, -73.6], 13);
+
+    L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
+        maxZoom: 19
+    }).addTo(map);
+
+    let markerStart = null;
+    let markerEnd   = null;
+    let polyEntrave = null;
+    let polyDetour  = null;
+
+    function clearDetour() {
+        if (markerStart) { map.removeLayer(markerStart); markerStart = null; }
+        if (markerEnd)   { map.removeLayer(markerEnd);   markerEnd   = null; }
+        if (polyEntrave) { map.removeLayer(polyEntrave); polyEntrave = null; }
+        if (polyDetour)  { map.removeLayer(polyDetour);  polyDetour  = null; }
+    }
+
+    document.getElementById("btn-clear").onclick = clearDetour;
+
+    map.on("click", async (e) => {
+        const ligne = document.getElementById("ligneBus").value.trim() || "???";
+
+        // 1er clic : début de l'entrave
+        if (!markerStart) {
+            clearDetour();
+
+            markerStart = L.marker(e.latlng).addTo(map)
+                .bindPopup("Début de l'entrave<br>Ligne " + ligne)
+                .openPopup();
+            return;
+        }
+
+        // 2e clic : fin de l'entrave → calcul détour
+        if
