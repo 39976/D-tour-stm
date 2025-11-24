@@ -3,167 +3,246 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Détours STM – Cliquer sur la carte</title>
+    <title>Détours STM – Prototype</title>
 
+    <!-- Leaflet -->
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 
     <style>
-        body { margin:0; padding:0; }
-        #map { height:100vh; width:100vw; }
+        body {
+            margin: 0;
+            padding: 0;
+            font-family: Arial, sans-serif;
+        }
 
-        #floating-actions {
+        #map {
+            height: 100vh;
+            width: 100vw;
+        }
+
+        /* Panneau de contrôle en haut à gauche */
+        #controls {
             position: fixed;
-            bottom: 25px;
-            right: 20px;
-            display: flex;
-            flex-direction: column;
-            gap: 12px;
+            top: 15px;
+            left: 15px;
+            background: rgba(255,255,255,0.95);
+            padding: 10px 12px;
+            border-radius: 10px;
+            box-shadow: 0 3px 8px rgba(0,0,0,0.3);
             z-index: 9999;
+            font-size: 14px;
         }
 
-        .fab {
-            background: white;
-            padding: 12px 18px;
-            border-radius: 12px;
-            border: none;
-            font-size: 15px;
+        #controls label {
             font-weight: bold;
-            box-shadow: 0 4px 10px rgba(0,0,0,0.3);
         }
 
-        .fab-red {
+        #controls input {
+            width: 80px;
+            padding: 4px;
+            margin-left: 4px;
+        }
+
+        #controls button {
+            margin-top: 6px;
+            padding: 4px 10px;
+            border-radius: 6px;
+            border: none;
+            cursor: pointer;
+        }
+
+        #resetBtn {
             background: #ff4d4d;
             color: white;
+            margin-left: 4px;
+        }
+
+        #help {
+            font-size: 12px;
+            margin-top: 6px;
+            color: #444;
         }
     </style>
 </head>
 
 <body>
+    <div id="map"></div>
 
-<div id="map"></div>
+    <div id="controls">
+        <div>
+            <label>Ligne bus :</label>
+            <input type="text" id="ligneBus" placeholder="ex: 24">
+            <button id="clearBtn">Effacer détour</button>
+        </div>
+        <div id="help">
+            1er clic sur la carte : début de l'entrave<br>
+            2e clic : fin de l'entrave → calcul du détour
+        </div>
+    </div>
 
-<div id="floating-actions">
-    <button class="fab" id="avantBtn">Avant</button>
-    <button class="fab fab-red" id="apresBtn">Après</button>
-</div>
+    <script>
+        /*************** CONFIG GRAPHHOPPER ***************/
+        const API_KEY = "YOUR_API_KEY_HERE"; // 🔴 remplace par ta vraie clé
 
-<script>
+        async function getRoute(start, end) {
+            // start et end sont des objets {lat: ..., lng: ...}
+            let url =
+                "https://graphhopper.com/api/1/route?" +
+                "key=" + API_KEY +
+                "&vehicle=car" +
+                "&profile=car" +
+                "&locale=fr" +
+                "&points_encoded=true" +
+                "&instructions=false";
 
-const API_KEY = "1adf955d-015a-43ae-a58b-0e3c04d6a8d4"; // TA CLÉ
+            url += `&point=${start.lat},${start.lng}`;
+            url += `&point=${end.lat},${end.lng}`;
 
-// --- Decode Polyline ---
-function decodePolyline(encoded) {
-    let coords = [];
-    let index = 0, lat = 0, lng = 0;
+            const res = await fetch(url);
+            const data = await res.json();
+            console.log("Réponse GraphHopper :", data);
 
-    while (index < encoded.length) {
-        let b, shift = 0, result = 0;
-        do {
-            b = encoded.charCodeAt(index++) - 63;
-            result |= (b & 0x1f) << shift;
-            shift += 5;
-        } while (b >= 0x20);
-        let dlat = (result & 1) ? ~(result >> 1) : (result >> 1);
-        lat += dlat;
+            if (!data.paths || !data.paths[0]) {
+                alert("Aucun chemin trouvé pour ce détour");
+                return null;
+            }
 
-        shift = 0;
-        result = 0;
-        do {
-            b = encoded.charCodeAt(index++) - 63;
-            result |= (b & 0x1f) << shift;
-            shift += 5;
-        } while (b >= 0x20);
-        let dlng = (result & 1) ? ~(result >> 1) : (result >> 1);
-        lng += dlng;
+            return decodePolyline(data.paths[0].points);
+        }
 
-        coords.push([lat / 1e5, lng / 1e5]);
-    }
-    return coords;
-}
+        /*************** DÉCODEUR DE POLYLINE ***************/
+        function decodePolyline(encoded) {
+            let coords = [];
+            let index = 0, lat = 0, lng = 0;
 
-// --- ROUTING FUNCTION ---
-async function getRoute(points) {
+            while (index < encoded.length) {
+                let b, shift = 0, result = 0;
 
-    let url = "https://graphhopper.com/api/1/route?";
-    url += "key=" + API_KEY;
-    url += "&profile=car";
-    url += "&locale=fr";
-    url += "&points_encoded=true";
-    url += "&instructions=false";
+                do {
+                    b = encoded.charCodeAt(index++) - 63;
+                    result |= (b & 0x1f) << shift;
+                    shift += 5;
+                } while (b >= 0x20);
 
-    points.forEach(p => {
-        url += `&point=${p.lat},${p.lng}`;
-    });
+                let dlat = (result & 1) ? ~(result >> 1) : (result >> 1);
+                lat += dlat;
 
-    const res = await fetch(url);
-    const data = await res.json();
+                shift = 0;
+                result = 0;
 
-    if (!data.paths || !data.paths[0]) {
-        alert("Aucun chemin trouvé");
-        return null;
-    }
+                do {
+                    b = encoded.charCodeAt(index++) - 63;
+                    result |= (b & 0x1f) << shift;
+                    shift += 5;
+                } while (b >= 0x20);
 
-    return decodePolyline(data.paths[0].points);
-}
+                let dlng = (result & 1) ? ~(result >> 1) : (result >> 1);
+                lng += dlng;
 
-// --- LEAFLET MAP ---
-let map = L.map("map").setView([45.51, -73.56], 13);
+                coords.push([lat / 1e5, lng / 1e5]);
+            }
 
-L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
-    maxZoom: 19
-}).addTo(map);
+            return coords;
+        }
 
-let startMarker = null;
-let endMarker = null;
-let start = null;
-let end = null;
+        /*************** LEAFLET : CARTE ***************/
+        let map = L.map("map").setView([45.51, -73.57], 13);
 
-let routeAvant = null;
-let routeApres = null;
+        L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
+            maxZoom: 19
+        }).addTo(map);
 
-// --- CLICK HANDLER ---
-map.on("click", (e) => {
-    if (!start) {
-        start = e.latlng;
-        startMarker = L.marker(start, {color:"green"}).addTo(map);
-    } 
-    else if (!end) {
-        end = e.latlng;
-        endMarker = L.marker(end, {color:"red"}).addTo(map);
-    } 
-    else {
-        alert("2 points déjà définis.\nRecharge la page pour recommencer.");
-    }
-});
+        /*************** ÉTAT DU DÉTOUR ***************/
+        let detourStart = null;
+        let detourEnd = null;
+        let detourLine = null;
+        let startMarker = null;
+        let endMarker = null;
 
-// --- AVANT ---
-document.getElementById("avantBtn").onclick = async () => {
-    if (!start || !end) { alert("Tape 2 points sur la carte d'abord !"); return; }
+        function resetDetour() {
+            detourStart = null;
+            detourEnd = null;
+            if (detourLine) {
+                map.removeLayer(detourLine);
+                detourLine = null;
+            }
+            if (startMarker) {
+                map.removeLayer(startMarker);
+                startMarker = null;
+            }
+            if (endMarker) {
+                map.removeLayer(endMarker);
+                endMarker = null;
+            }
+        }
 
-    if (routeAvant) map.removeLayer(routeAvant);
+        document.getElementById("clearBtn").onclick = resetDetour;
 
-    const coords = await getRoute([ start, end ]);
-    if (!coords) return;
+        /*************** CLICS SUR LA CARTE ***************/
+        map.on("click", async (e) => {
+            const ligne = document.getElementById("ligneBus").value || "??";
 
-    routeAvant = L.polyline(coords, { color: "blue", weight: 4 }).addTo(map);
-    map.fitBounds(routeAvant.getBounds());
-};
+            if (!detourStart) {
+                // 1er clic = début de l'entrave
+                detourStart = e.latlng;
 
-// --- APRES ---
-document.getElementById("apresBtn").onclick = async () => {
-    if (!start || !end) { alert("Tape 2 points sur la carte d'abord !"); return; }
+                if (startMarker) map.removeLayer(startMarker);
+                startMarker = L.marker(detourStart)
+                    .addTo(map)
+                    .bindPopup("Début de l'entrave<br>Ligne " + ligne)
+                    .openPopup();
 
-    if (routeApres) map.removeLayer(routeApres);
+            } else if (!detourEnd) {
+                // 2e clic = fin de l'entrave + calcul du détour
+                detourEnd = e.latlng;
 
-    const coords = await getRoute([ start, end ]);
-    if (!coords) return;
+                if (endMarker) map.removeLayer(endMarker);
+                endMarker = L.marker(detourEnd)
+                    .addTo(map)
+                    .bindPopup("Fin de l'entrave<br>Ligne " + ligne)
+                    .openPopup();
 
-    routeApres = L.polyline(coords, { color: "red", weight: 4 }).addTo(map);
-    map.fitBounds(routeApres.getBounds());
-};
+                // Appel GraphHopper pour calculer le détour entre start et end
+                const coords = await getRoute(
+                    { lat: detourStart.lat, lng: detourStart.lng },
+                    { lat: detourEnd.lat, lng: detourEnd.lng }
+                );
 
-</script>
+                if (!coords) {
+                    // échec : on reset tout
+                    detourStart = null;
+                    detourEnd = null;
+                    return;
+                }
+
+                if (detourLine) {
+                    map.removeLayer(detourLine);
+                }
+
+                detourLine = L.polyline(coords, {
+                    color: "red",
+                    weight: 5
+                }).addTo(map);
+
+                map.fitBounds(detourLine.getBounds());
+
+                // Option : une fois le détour tracé, on laisse les points,
+                // et si la personne reclique encore sur la carte,
+                // on recommence un nouveau détour.
+                detourStart = null;
+                detourEnd = null;
+            } else {
+                // Par sécurité : si jamais les deux sont définis, on reset et on recommence
+                resetDetour();
+                detourStart = e.latlng;
+                startMarker = L.marker(detourStart)
+                    .addTo(map)
+                    .bindPopup("Début de l'entrave<br>Ligne " + ligne)
+                    .openPopup();
+            }
+        });
+    </script>
 
 </body>
 </html>
