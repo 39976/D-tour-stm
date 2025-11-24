@@ -2,132 +2,184 @@
 <!DOCTYPE html>
 <html lang="fr">
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Détours STM</title>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Détours STM – Carte Fixée</title>
 
-<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
-<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <!-- Leaflet -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 
-<style>
-body {
-    margin: 0;
-    padding: 0;
-    font-family: Arial;
-}
-#map {
-    width: 100vw;
-    height: 100vh;
-}
-#panel {
-    position: fixed;
-    top: 10px;
-    left: 10px;
-    background: white;
-    padding: 10px;
-    border-radius: 10px;
-    z-index: 2000;
-    box-shadow: 0 3px 10px rgba(0,0,0,0.3);
-}
-button {
-    padding: 8px 14px;
-    margin-left: 8px;
-    border-radius: 8px;
-    border: none;
-}
-</style>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            font-family: Arial, sans-serif;
+        }
 
+        /* La carte prend TOUT l'écran */
+        #map {
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            z-index: 1;
+        }
+
+        /* Le panneau blanc reste au-dessus */
+        #panel {
+            position: fixed;
+            top: 10px;
+            left: 10px;
+            right: 10px;
+            background: white;
+            padding: 12px;
+            border-radius: 12px;
+            z-index: 9999;
+            box-shadow: 0 4px 10px rgba(0,0,0,0.3);
+        }
+
+        #buttons {
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+            z-index: 9999;
+        }
+
+        .bouton {
+            padding: 14px 18px;
+            border-radius: 12px;
+            border: none;
+            font-size: 16px;
+            font-weight: bold;
+            background: white;
+            box-shadow: 0px 3px 10px rgba(0,0,0,0.3);
+        }
+
+        .rouge {
+            background: #ff4d4d;
+            color: white;
+        }
+    </style>
 </head>
+
 <body>
 
-<div id="panel">
-    <label>Ligne bus :</label>
-    <input id="busLine" placeholder="186">
-    <button onclick="clearDetour()">Effacer détour</button>
-    <p>1er clic : début de l'entrave<br>2e clic : fin de l'entrave → calcul</p>
-</div>
+    <!-- CARTE -->
+    <div id="map"></div>
 
-<div id="map"></div>
+    <!-- PANEL -->
+    <div id="panel">
+        <label>Ligne bus :</label>
+        <input id="ligne" type="text" placeholder="186">
+        <button onclick="resetDetour()">Effacer détour</button>
 
-<script>
-const API_KEY = "1adf955d-015a-43ae-a58b-0e3c04d6a8d4";  // ✔ intégrée
+        <p style="font-size:14px;">
+            1er clic : début<br>
+            2e clic : fin → calcul du détour
+        </p>
+    </div>
 
-let map = L.map("map").setView([45.55, -73.6], 13);
-L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png").addTo(map);
+    <!-- BOUTONS -->
+    <div id="buttons">
+        <button class="bouton">Avant</button>
+        <button class="bouton rouge">Après</button>
+    </div>
 
-let markers = [];
-let polyline = null;
+    <script>
+        /* ⚠️ API KEY AUTOMATIQUE */
+        const API_KEY = "1adf955d-015a-43ae-a58b-0e3c04d6a8d4";
 
-function decodePolyline(str) {
-    let coords = [];
-    let index = 0, lat = 0, lng = 0;
+        /* Initialisation carte */
+        let map = L.map("map").setView([45.55, -73.6], 13);
 
-    while (index < str.length) {
-        let b, shift = 0, result = 0;
-        do {
-            b = str.charCodeAt(index++) - 63;
-            result |= (b & 0x1f) << shift;
-            shift += 5;
-        } while (b >= 0x20);
-        let dlat = (result & 1) ? ~(result >> 1) : (result >> 1);
-        lat += dlat;
+        L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
+            maxZoom: 19
+        }).addTo(map);
 
-        shift = 0;
-        result = 0;
-        do {
-            b = str.charCodeAt(index++) - 63;
-            result |= (b & 0x1f) << shift;
-            shift += 5;
-        } while (b >= 0x20);
-        let dlng = (result & 1) ? ~(result >> 1) : (result >> 1);
-        lng += dlng;
+        let points = [];
+        let markers = [];
+        let trace = null;
 
-        coords.push([lat / 1e5, lng / 1e5]);
-    }
-    return coords;
-}
+        function resetDetour() {
+            points = [];
+            markers.forEach(m => map.removeLayer(m));
+            markers = [];
+            if (trace) map.removeLayer(trace);
+            trace = null;
+        }
 
-async function calcRoute(p1, p2) {
-    const url =
-        `https://graphhopper.com/api/1/route?key=${API_KEY}` +
-        `&vehicle=car&points_encoded=true&instructions=false` +
-        `&point=${p1.lat},${p1.lng}&point=${p2.lat},${p2.lng}`;
+        function decodePolyline(encoded) {
+            let coords = [];
+            let index = 0, lat = 0, lng = 0;
 
-    const res = await fetch(url);
-    const data = await res.json();
+            while (index < encoded.length) {
+                let b, shift = 0, result = 0;
 
-    if (!data.paths || !data.paths[0]) {
-        alert("Aucun chemin trouvé pour ce détour");
-        return null;
-    }
+                do {
+                    b = encoded.charCodeAt(index++) - 63;
+                    result |= (b & 0x1f) << shift;
+                    shift += 5;
+                } while (b >= 0x20);
 
-    return decodePolyline(data.paths[0].points);
-}
+                let dlat = (result & 1) ? ~(result >> 1) : (result >> 1);
+                lat += dlat;
 
-map.on("click", async e => {
-    markers.push(L.marker(e.latlng).addTo(map));
+                shift = 0;
+                result = 0;
 
-    if (markers.length === 2) {
-        const start = markers[0].getLatLng();
-        const end   = markers[1].getLatLng();
+                do {
+                    b = encoded.charCodeAt(index++) - 63;
+                    result |= (b & 0x1f) << shift;
+                    shift += 5;
+                } while (b >= 0x20);
 
-        const coords = await calcRoute(start, end);
-        if (!coords) return;
+                let dlng = (result & 1) ? ~(result >> 1) : (result >> 1);
+                lng += dlng;
 
-        if (polyline) map.removeLayer(polyline);
+                coords.push([lat / 1e5, lng / 1e5]);
+            }
 
-        polyline = L.polyline(coords, {color: "red", weight: 4}).addTo(map);
-        map.fitBounds(polyline.getBounds());
-    }
-});
+            return coords;
+        }
 
-function clearDetour() {
-    markers.forEach(m => map.removeLayer(m));
-    markers = [];
-    if (polyline) map.removeLayer(polyline);
-}
+        /* Récupération du détour */
+        async function calculDetour(start, end) {
 
-</script>
+            let url =
+                "https://graphhopper.com/api/1/route?key=" + API_KEY +
+                "&vehicle=car&locale=fr&points_encoded=true&instructions=false&ch.disable=true" +
+                `&point=${start.lat},${start.lng}` +
+                `&point=${end.lat},${end.lng}`;
+
+            const res = await fetch(url);
+            const data = await res.json();
+
+            if (!data.paths || !data.paths[0]) {
+                alert("Aucun chemin trouvé pour ce détour");
+                return;
+            }
+
+            const coords = decodePolyline(data.paths[0].points);
+            trace = L.polyline(coords, { color: "red", weight: 5 }).addTo(map);
+            map.fitBounds(trace.getBounds());
+        }
+
+        map.on("click", e => {
+            points.push(e.latlng);
+
+            let marker = L.marker(e.latlng).addTo(map);
+            markers.push(marker);
+
+            if (points.length === 2) {
+                calculDetour(points[0], points[1]);
+            }
+        });
+    </script>
 
 </body>
 </html>
