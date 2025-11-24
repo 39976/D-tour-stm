@@ -3,24 +3,14 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Détours STM – FIXED</title>
+    <title>Détours STM – WORKING</title>
 
-    <!-- Leaflet -->
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 
     <style>
-        body {
-            margin: 0;
-            padding: 0;
-            font-family: Arial, sans-serif;
-            overflow: hidden;
-        }
-
-        #map {
-            height: 100vh;
-            width: 100vw;
-        }
+        body { margin: 0; padding: 0; font-family: Arial; }
+        #map { height: 100vh; width: 100vw; }
 
         #floating-actions {
             position: fixed;
@@ -40,13 +30,9 @@
             font-size: 15px;
             font-weight: bold;
             box-shadow: 0 4px 10px rgba(0,0,0,0.3);
-            cursor: pointer;
         }
 
-        .fab-red {
-            background: #ff4d4d;
-            color: white;
-        }
+        .fab-red { background: #ff4d4d; color:white; }
     </style>
 </head>
 
@@ -60,6 +46,7 @@
     </div>
 
     <script>
+
         function decodePolyline(encoded) {
             let coords = [];
             let index = 0, lat = 0, lng = 0;
@@ -76,8 +63,7 @@
                 let dlat = (result & 1) ? ~(result >> 1) : (result >> 1);
                 lat += dlat;
 
-                shift = 0;
-                result = 0;
+                shift = 0; result = 0;
 
                 do {
                     b = encoded.charCodeAt(index++) - 63;
@@ -94,8 +80,7 @@
             return coords;
         }
 
-        /* ⭐ TA CLÉ API GraphHopper ⭐ */
-        const API_KEY = "87a97ff3-8371-4f51-a54d-79f0d8f9fa48";
+        const API_KEY = "1adf955d-015a-43ae-a58b-0e3c04d6a8d4";
 
         async function getRoute(points) {
             let url =
@@ -105,8 +90,7 @@
                 "&profile=car" +
                 "&locale=fr" +
                 "&points_encoded=true" +
-                "&instructions=false"; 
-                // ❗ IMPORTANT : PAS de ch.disable=true → interdit dans le plan gratuit
+                "&instructions=false";
 
             points.forEach(p => {
                 url += `&point=${p.lat},${p.lng}`;
@@ -115,10 +99,9 @@
             const res = await fetch(url);
             const data = await res.json();
 
-            console.log("Réponse GraphHopper :", data);
-
             if (!data.paths || !data.paths[0]) {
                 alert("Aucun chemin trouvé");
+                console.log(data);
                 return null;
             }
 
@@ -156,6 +139,7 @@
             routeApres = L.polyline(coords, { color: "red", weight: 4 }).addTo(map);
             map.fitBounds(routeApres.getBounds());
         };
+
     </script>
 
 </body>
