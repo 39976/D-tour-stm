@@ -1,120 +1,43 @@
 <!DOCTYPE html>
-<html>
+<html lang="fr">
 <head>
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Détours STM – clics multiples</title>
 
-<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
-<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <!-- Leaflet -->
+    <link rel="stylesheet"
+          href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 
-<style>
-    body { margin:0; padding:0; }
-    #map { width:100%; height:90vh; }
-    #panel {
-        background:white;
-        padding:10px;
-        font-size:18px;
-        border-bottom:2px solid #ccc;
-    }
-    input { font-size:18px; padding:5px; width:120px; }
-    button {
-        background:#ff4444; color:white;
-        padding:10px 15px; font-size:18px;
-        border:none; border-radius:8px;
-    }
-</style>
-</head>
+    <style>
+        * { box-sizing: border-box; }
+        body {
+            margin: 0;
+            font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+                         Roboto, Arial, sans-serif;
+        }
 
-<body>
+        #top-bar {
+            padding: 10px;
+            border-bottom: 1px solid #ddd;
+            background: #fff;
+            font-size: 16px;
+        }
 
-<div id="panel">
-    Ligne bus :
-    <input id="bus" placeholder="Ex : 186">
-    <button onclick="resetDetour()">Effacer détour</button>
-    <br><br>
-    1er clic : début du détour — 2e clic : fin du détour → calcul du trajet
-</div>
+        #top-bar input {
+            font-size: 16px;
+            padding: 4px 8px;
+        }
 
-<div id="map"></div>
+        #top-bar button {
+            font-size: 15px;
+            padding: 6px 10px;
+            margin-left: 6px;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+        }
 
-<script>
-
-// Clé API GraphHopper
-const API_KEY = "1adf955d-015a-43ae-a58b-0e3c04d6a8d4";
-
-let map = L.map('map').setView([45.55, -73.55], 14);
-L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png").addTo(map);
-
-let A=null, B=null;
-let mA=null, mB=null, poly=null, route=null;
-
-// click map
-map.on("click", e => {
-    if (!A) {
-        A = e.latlng;
-        mA = L.marker(A).addTo(map);
-    } else if (!B) {
-        B = e.latlng;
-        mB = L.marker(B).addTo(map);
-        calculDetour();
-    }
-});
-
-// reset
-function resetDetour() {
-    A=null; B=null;
-    if (mA) map.removeLayer(mA);
-    if (mB) map.removeLayer(mB);
-    if (poly) map.removeLayer(poly);
-    if (route) map.removeLayer(route);
-}
-
-// calc
-async function calculDetour() {
-
-    // zone à éviter = rectangle autour du segment A ↔ B
-    let avoid = [
-        [A.lng, A.lat],
-        [B.lng, B.lat]
-    ];
-
-    // requête API GraphHopper
-    const url = `https://graphhopper.com/api/1/route?key=${API_KEY}`;
-    const body = {
-        profile: "car",
-        points: [
-            [A.lng, A.lat],
-            [B.lng, B.lat]
-        ],
-        avoid_areas: [{
-            type:"Feature",
-            geometry:{
-                type:"LineString",
-                coordinates: avoid
-            }
-        }]
-    };
-
-    const r = await fetch(url, {
-        method:"POST",
-        headers:{ "Content-Type":"application/json" },
-        body: JSON.stringify(body)
-    });
-
-    const data = await r.json();
-
-    if (!data.paths || data.paths.length==0) {
-        alert("Aucun détour possible.");
-        return;
-    }
-
-    // tracé détour
-    const pts = data.paths[0].points.coordinates.map(p=>[p[1],p[0]]);
-    if (route) map.removeLayer(route);
-    route = L.polyline(pts, {color:"red",weight:5}).addTo(map);
-    map.fitBounds(route.getBounds());
-}
-
-</script>
-
-</body>
-</html>
+        #btn-reset { background: #f44336; color: white; }
+        #btn-route { background: #1976d
