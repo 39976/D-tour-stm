@@ -6,10 +6,7 @@
   <title>Détours STM – Démo rues</title>
 
   <!-- Leaflet CSS -->
-  <link
-    rel="stylesheet"
-    href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.css"
-  >
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.css">
 
   <style>
     html, body {
@@ -20,14 +17,12 @@
       font-family: sans-serif;
     }
 
-    /* Carte plein écran */
     #map {
       position: absolute;
       inset: 0;
       z-index: 1;
     }
 
-    /* Panneau flottant en haut */
     #panel {
       position: absolute;
       top: 10px;
@@ -60,4 +55,136 @@
 
   <div id="panel">
     <label>Ligne bus :</label>
-    <input id="
+    <input id="ligne" type="text" placeholder="(facultatif)">
+
+    <br><br>
+
+    <button id="clearBtn">Effacer tracés</button>
+
+    <p style="margin-top:10px;">
+      👉 Clique sur une rue.<br>
+      • Si c’est <b>Rue Sherbrooke Ouest</b> ou <b>Rue Sherbrooke Est</b>,<br>
+      &nbsp;&nbsp;→ j’affiche les lignes de bus connues qui passent par là.<br>
+      • Sinon : aucun tracé (démo).
+    </p>
+  </div>
+
+  <div id="map"></div>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.js"></script>
+
+  <script>
+    // ================== 1. CARTE ==================
+    const map = L.map('map');
+    L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      maxZoom: 19
+    }).addTo(map);
+    map.setView([45.51, -73.58], 12); // Montréal
+
+    let displayedLines = [];
+    function clearLines() {
+      displayedLines.forEach(l => map.removeLayer(l));
+      displayedLines = [];
+    }
+    document.getElementById("clearBtn").onclick = clearLines;
+
+    // ================== 2. LIGNES PAR RUE (DEMO) ==================
+    const streetLines = {
+      "Rue Sherbrooke Ouest": ["24", "105", "138", "356"],
+      "Rue Sherbrooke Est":  ["24", "125", "185", "356"]
+    };
+
+    const lineColors = {
+      "24":  "blue",
+      "105": "red",
+      "138": "green",
+      "356": "purple",
+      "125": "orange",
+      "185": "brown"
+    };
+
+    // ================== 3. NOM DE RUE VIA OVERPASS ==================
+    async function getStreetName(lat, lng) {
+      const query = `
+        [out:json];
+        way(around:20, ${lat}, ${lng})["highway"];
+        out tags;
+      `;
+      try {
+        const res = await fetch("https://overpass-api.de/api/interpreter", {
+          method: "POST",
+          headers: { "Content-Type": "text/plain" },
+          body: query
+        });
+        const json = await res.json();
+        if (json.elements && json.elements.length > 0) {
+          return json.elements[0].tags.name || "Rue inconnue";
+        }
+      } catch (e) {
+        console.error(e);
+      }
+      return "Rue inconnue";
+    }
+
+    // ================== 4. TRACER LIGNES ==================
+    function drawLinesForStreet(streetName, lat, lng) {
+      clearLines();
+
+      const name = streetName.trim();
+      const filt = document.getElementById("ligne").value.trim();
+
+      const lignes = streetLines[name] || [];
+
+      const lignesFiltrees = filt
+        ? lignes.filter(n => n === filt)
+        : lignes;
+
+      if (lignesFiltrees.length === 0) return lignes;
+
+      const lonDelta = 0.01;
+      const latDelta = 0.0005;
+
+      lignesFiltrees.forEach(num => {
+        const col = lineColors[num] || "#0072bc";
+        const coords = [
+          [lat - latDelta, lng - lonDelta],
+          [lat,            lng],
+          [lat + latDelta, lng + lonDelta]
+        ];
+        const poly = L.polyline(coords, {
+          color: col,
+          weight: 5,
+          opacity: 0.9
+        }).addTo(map);
+        displayedLines.push(poly);
+      });
+
+      return lignesFiltrees;
+    }
+
+    // ================== 5. CLIC SUR LA CARTE ==================
+    map.on("click", async (e) => {
+      const lat = e.latlng.lat;
+      const lng = e.latlng.lng;
+
+      const loadingPopup = L.popup()
+        .setLatLng(e.latlng)
+        .setContent("Recherche de la rue…")
+        .openOn(map);
+
+      const street = await getStreetName(lat, lng);
+      const lignesActives = drawLinesForStreet(street, lat, lng);
+
+      const txtLignes = (lignesActives && lignesActives.length > 0)
+        ? lignesActives.join(", ")
+        : "aucune (pour cette rue dans cette démo)";
+
+      loadingPopup.setContent(
+        `<b>Rue :</b> ${street}<br>` +
+        `<b>Lignes STM :</b> ${txtLignes}`
+      );
+    });
+  </script>
+
+</body>
+</html>
