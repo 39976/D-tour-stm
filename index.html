@@ -4,41 +4,47 @@
   <meta charset="UTF-8">
   <title>Détours STM</title>
 
-  <!-- Leaflet CSS -->
   <link rel="stylesheet"
         href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.css">
 
   <style>
-    body {
+    html, body {
       margin: 0;
       padding: 0;
+      height: 100%;
+      overflow: hidden;
       font-family: sans-serif;
-      height: 100vh;
-      display: flex;
-      flex-direction: column;
     }
 
-    /* Ton panneau en haut */
-    #panel {
-      padding: 15px;
-      background: white;
-      box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-      z-index: 1000;
-    }
-
-    /* Carte qui prend toute la hauteur restante */
+    /* 🔥 La carte prend TOUT L'ÉCRAN */
     #map {
-      flex: 1;              /* 🔥 remplit tout l’espace disponible */
-      width: 100%;
-      background: #ccc;
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      z-index: 1;
+    }
+
+    /* 🔥 Le panel flotte par-dessus */
+    #panel {
+      position: absolute;
+      top: 10px;
+      left: 10px;
+      right: 10px;
+
+      background: white;
+      padding: 15px;
+      border-radius: 10px;
+      box-shadow: 0 4px 10px rgba(0,0,0,0.25);
+      z-index: 9999;
     }
   </style>
-
 </head>
 
 <body>
 
-  <!-- Ton interface -->
+  <!-- Panel flottant -->
   <div id="panel">
     <label>Ligne bus :</label>
     <input id="ligne" type="text" value="186">
@@ -50,23 +56,20 @@
       Effacer détour
     </button>
 
-    <p>
-      1er clic : <b>début du détour</b> —  
+    <p style="margin-top:10px;">
+      1er clic : <b>début du détour</b> —
       2e clic : <b>fin du détour</b> → calcul automatique
     </p>
   </div>
 
-  <!-- La carte -->
+  <!-- Carte plein écran -->
   <div id="map"></div>
 
-  <!-- Leaflet JS -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.js"></script>
 
   <script>
-    // Initialisation de la carte
     const map = L.map('map').setView([45.508, -73.587], 12);
 
-    // Fond OSM
     L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
       maxZoom: 19
     }).addTo(map);
