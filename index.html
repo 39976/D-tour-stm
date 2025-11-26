@@ -3,13 +3,13 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Détours STM – Rue + lignes STM</title>
+  <title>Détours STM – Rue + lignes STM + tracé</title>
 
   <!-- Leaflet -->
   <link
     rel="stylesheet"
     href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
-    integrity="sha256-p4NxAoJBhI+2bRj7kC6tHvtwXZh8wPj0zY+3F2Q6pCw="
+    integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
     crossorigin=""
   />
   <script
@@ -19,11 +19,9 @@
   ></script>
 
   <style>
-    /* Plein écran + fix mobile obligatoire */
     html,
     body {
       height: 100%;
-      width: 100%;
       margin: 0;
       padding: 0;
     }
@@ -33,179 +31,61 @@
       width: 100%;
     }
 
-    /* Bandeau d'instructions en haut */
-    .top-banner {
+    .info-banner {
       position: absolute;
+      top: 12px;
+      left: 50%;
+      transform: translateX(-50%);
       z-index: 1000;
-      top: 10px;
-      left: 10px;
-      right: 10px;
+      background: white;
+      padding: 10px 14px;
+      border-radius: 12px;
+      box-shadow: 0 2px 10px rgba(0, 0, 0, 0.15);
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+        sans-serif;
+      font-size: 15px;
+      max-width: 95%;
+    }
+
+    .info-banner b {
+      font-weight: 700;
+    }
+
+    .legend {
       background: white;
       padding: 8px 10px;
-      border-radius: 10px;
-      box-shadow: 0 2px 6px rgba(0, 0, 0, 0.3);
-      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
-        sans-serif;
-      font-size: 16px;
-      line-height: 1.3;
-    }
-
-    /* Popup : texte plus lisible */
-    .leaflet-popup-content {
-      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
-        sans-serif;
-      font-size: 14px;
-      line-height: 1.3;
-    }
-
-    /* Légende des lignes STM */
-    .stm-legend {
-      background: white;
-      padding: 6px 8px;
       border-radius: 8px;
-      box-shadow: 0 2px 6px rgba(0, 0, 0, 0.3);
+      box-shadow: 0 2px 6px rgba(0, 0, 0, 0.25);
       font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
         sans-serif;
-      font-size: 12px;
-      max-height: 40vh;
-      overflow-y: auto;
+      font-size: 13px;
+      line-height: 1.4;
     }
 
-    .stm-legend-title {
-      font-weight: 600;
+    .legend-title {
+      font-weight: 700;
       margin-bottom: 4px;
     }
 
-    .stm-line-item {
-      white-space: nowrap;
-    }
-  </style>
-</head>
-<body>
-  <div class="top-banner">
-    👉 Clique une rue : j’affiche la rue <strong>EXACTE</strong> + les
-    <strong>lignes STM</strong> associées + le <strong>tracé</strong>
-    (multi-lignes).
-  </div>
-  <div id="map"></div>
-
-  <script>
-    // -----------------------------
-    // 1) Initialisation de la carte
-    // -----------------------------
-    const map = L.map("map").setView([45.5089, -73.5617], 14); // Centre Montréal
-
-    L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
-      maxZoom: 19,
-      attribution: '&copy; OpenStreetMap contributors',
-    }).addTo(map);
-
-    // Couches actives
-    let activeStreetLayer = null;       // Tracé de base
-    let activeLineLayers = [];          // Tracés multi-lignes
-    let activePopup = null;             // Popup info
-
-    // Légende en bas à gauche
-    const legendControl = L.control({ position: "bottomleft" });
-    legendControl.onAdd = function () {
-      const div = L.DomUtil.create("div", "stm-legend");
-      div.innerHTML = "<span class='stm-legend-title'>Lignes STM</span><br/><em>Clique une rue…</em>";
-      return div;
-    };
-    legendControl.addTo(map);
-
-    function updateLegend(lines) {
-      const div = legendControl.getContainer();
-      if (!lines || !lines.length) {
-        div.innerHTML =
-          "<span class='stm-legend-title'>Lignes STM</span><br/><em>Aucune donnée pour ce tronçon.</em>";
-        return;
-      }
-      const list = lines
-        .map((l) => `<div class="stm-line-item">• Ligne ${l}</div>`)
-        .join("");
-      div.innerHTML =
-        "<span class='stm-legend-title'>Lignes STM</span><br/>" + list;
+    .legend-line {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      margin-bottom: 2px;
     }
 
-    // -----------------------------
-    // 2) Offset pour multi-lignes
-    // -----------------------------
-    function offsetLatLngs(latlngs, index, total) {
-      // petit décalage latéral en degrés (~ quelques mètres)
-      const delta = 0.00006;
-      const offset = (index - (total - 1) / 2) * delta;
-
-      return latlngs.map((pt) => [pt[0], pt[1] + offset]);
+    .legend-color {
+      width: 12px;
+      height: 12px;
+      border-radius: 999px;
+      border: 1px solid #00000033;
     }
 
-    // -----------------------------
-    // 3) Requête Overpass
-    // -----------------------------
-    async function fetchStreetAndLines(lat, lng) {
-      // 1) On récupère les ways de la rue cliquée (avec un petit radius)
-      // 2) On ne garde que les relations de bus STM qui CONTIENNENT ces ways.
-      const query = `
-[out:json][timeout:25];
+    .leaflet-popup-content {
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+        sans-serif;
+    }
 
-// ways de la rue exactement à l'endroit cliqué
-(
-  way(around:25, ${lat}, ${lng})["highway"]["name"];
-)->.street;
-
-// on récupère ces ways + les relations de bus STM qui les utilisent
-(
-  .street;
-  rel["route"="bus"]["network"~"STM"](bw.street);
-);
-out body geom;
->;
-out skel qt;
-`;
-
-      const res = await fetch("https://overpass-api.de/api/interpreter", {
-        method: "POST",
-        body: query,
-      });
-
-      if (!res.ok) {
-        throw new Error("Erreur Overpass : " + res.status);
-      }
-
-      const json = await res.json();
-
-      // --- Extraction de la rue exacte ---
-      const ways = json.elements.filter(
-        (el) =>
-          el.type === "way" &&
-          el.tags &&
-          el.tags.highway &&
-          el.tags.name &&
-          el.geometry
-      );
-
-      if (!ways.length) {
-        return {
-          streetName: "Rue inconnue",
-          segments: [],
-          stmLines: [],
-        };
-      }
-
-      // On prend le nom de la première way trouvée (la plus proche)
-      const streetName = ways[0].tags.name;
-
-      // On garde uniquement les ways qui ont exactement ce même nom
-      const streetWays = ways.filter((w) => w.tags.name === streetName);
-      const streetWayIds = new Set(streetWays.map((w) => w.id));
-
-      const segments = streetWays.map((w) =>
-        w.geometry.map((p) => [p.lat, p.lon])
-      );
-
-      // --- Extraction des relations de bus STM ---
-      const relations = json.elements.filter(
-        (el) => el.type === "relation" && el.tags && el.tags.route === "bus"
-      );
-
-      const stmLines
+    .leaflet-popup-content b {
+      font-weight: 700;
+    }
