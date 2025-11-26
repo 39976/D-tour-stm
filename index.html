@@ -1,102 +1,146 @@
 <!DOCTYPE html>
 <html lang="fr">
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Détours STM</title>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Détours STM</title>
 
-<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
-<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 
-<style>
-html, body { height: 100%; margin: 0; padding: 0; }
-#map { height: 100%; width: 100%; }
+  <style>
+    html, body { height: 100%; margin: 0; padding: 0; }
+    #map { height: 100%; width: 100%; }
 
-.info-box {
-    position: absolute;
-    top: 10px; left: 10px;
-    background: white;
-    padding: 15px;
-    border-radius: 10px;
-    font-size: 18px;
-    box-shadow: 0 0 10px rgba(0,0,0,0.2);
-    z-index: 1000;
-}
-</style>
+    #panel {
+      position: absolute;
+      top: 10px;
+      left: 10px;
+      right: 10px;
+      background: white;
+      padding: 12px;
+      border-radius: 12px;
+      z-index: 1000;
+      font-size: 18px;
+      box-shadow: 0 4px 10px rgba(0,0,0,0.3);
+    }
+  </style>
 </head>
 
 <body>
 
-<div class="info-box">
-👉 Clique une rue : j’affiche la rue EXACTE + les lignes STM + le tracé.
+<div id="panel">
+  👉 Clique une rue : j’affiche la rue EXACTE + les lignes STM + le tracé réel.
 </div>
 
 <div id="map"></div>
 
 <script>
-const map = L.map("map").setView([45.5017, -73.5673], 15);
-L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom: 19 }).addTo(map);
+const map = L.map('map').setView([45.508, -73.587], 14);
+L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png").addTo(map);
 
-let streetLine = L.layerGroup().addTo(map);
+let activeLineLayers = [];
 
-const OVERPASS_URL = "https://overpass.kumi.systems/api/interpreter";
+// --- Base STM (à étendre plus tard) ---
+const streetLines = {
+  "Sherbrooke": ["24", "105", "138", "356"],
+  "Sherbrooke Ouest": ["24", "105", "138", "356"],
+  "Rue Sherbrooke Ouest": ["24", "105", "138", "356"],
+  "Sherbrooke Street West": ["24", "105", "138", "356"]
+};
 
-// 🔥 NO AREA → Requête universelle qui fonctionne PARTOUT
-async function getStreetGeometry(streetName) {
-    const query = `
-        [out:json][timeout:25];
-        way["name"="${streetName}"];
-        out geom;
-    `;
+const lineColors = {
+  "24": "blue",
+  "105": "red",
+  "138": "green",
+  "356": "purple"
+};
 
-    const res = await fetch(OVERPASS_URL, {
-        method: "POST",
-        body: query
-    });
-
-    return res.json();
+// NETTOYER TRACÉ
+function clearStreet() {
+  activeLineLayers.forEach(l => map.removeLayer(l));
+  activeLineLayers = [];
 }
 
-map.on("click", async function (e) {
+// --- TESTE TOUTES LES VARIANTES DE NOM ---
+function nameVariants(name) {
+  if (!name) return [];
 
-    const lat = e.latlng.lat;
-    const lon = e.latlng.lng;
+  const base = name.replace("Rue ", "").trim();
 
-    const rev = await fetch(
-        `https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lon}&format=json&zoom=18&addressdetails=1`
-    ).then(r => r.json());
+  return [
+    base,
+    "Rue " + base,
+    base + " Ouest",
+    base + " West",
+    "Rue " + base + " Ouest",
+    "Rue " + base + " West",
+    base.replace("Ouest", "West"),
+    base.replace("West", "Ouest")
+  ];
+}
 
-    if (!rev.address || !rev.address.road) {
-        alert("Rue inconnue.");
-        return;
-    }
+// --- RECHERCHE LA RUE DANS OSM (TRACÉ COMPLET) ---
+async function fetchOSMWay(fullName) {
+  const query = `
+    [out:json];
+    way["name"="${fullName}"](around:50,${lastLat},${lastLng});
+    out geom;
+  `;
 
-    const street = rev.address.road;
-    const stmLines = rev.extratags?.bus_routes || "Aucune donnée";
+  const res = await fetch("https://overpass-api.de/api/interpreter", {
+    method: "POST",
+    body: query
+  });
 
-    // Tracé exact
-    const overpass = await getStreetGeometry(street);
+  const json = await res.json();
+  return json.elements || [];
+}
 
-    streetLine.clearLayers();
+let lastLat = 0, lastLng = 0;
 
-    if (!overpass.elements.length) {
-        console.log("Aucun tracé trouvé pour", street);
-    }
+// --- DESSINE LE TRACÉ EXACT ---
+function drawOSMWay(way) {
+  const coords = way.geometry.map(pt => [pt.lat, pt.lon]);
 
-    overpass.elements.forEach(w => {
-        const coords = w.geometry.map(p => [p.lat, p.lon]);
-        L.polyline(coords, { color: "purple", weight: 6 }).addTo(streetLine);
-    });
+  const poly = L.polyline(coords, {
+    color: "yellow",
+    weight: 7
+  }).addTo(map);
 
-    L.popup()
-        .setLatLng(e.latlng)
-        .setContent(`
-            <b>Rue :</b> ${street}<br>
-            <b>Lignes STM :</b> ${stmLines}
-        `)
-        .openOn(map);
-});
-</script>
+  activeLineLayers.push(poly);
+}
 
-</body>
-</html>
+// --- HANDLE CLICK ---
+map.on("click", async e => {
+  lastLat = e.latlng.lat;
+  lastLng = e.latlng.lng;
+
+  const popup = L.popup().setLatLng(e.latlng).setContent("Recherche…").openOn(map);
+
+  // Récupérer le nom brut de la rue (n’importe laquelle)
+  const nameQuery = `
+    [out:json];
+    way(around:15, ${lastLat}, ${lastLng})["highway"]["name"];
+    out tags;
+  `;
+  const res = await fetch("https://overpass-api.de/api/interpreter", { method: "POST", body: nameQuery });
+  const json = await res.json();
+
+  if (!json.elements.length) {
+    popup.setContent("Rue inconnue");
+    return;
+  }
+
+  const rawName = json.elements[0].tags.name;
+
+  clearStreet();
+
+  let found = null;
+  let goodName = rawName;
+
+  // TESTER TOUTES LES VARIANTES
+  const variants = nameVariants(rawName);
+
+  for (let v of variants) {
+    const ways = await fetchOSMWay(v);
