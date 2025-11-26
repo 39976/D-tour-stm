@@ -89,3 +89,318 @@
     .leaflet-popup-content b {
       font-weight: 700;
     }
+  </style>
+</head>
+
+<body>
+  <div class="info-banner">
+    👉 Clique une rue : j’affiche la rue <b>EXACTE</b> + les
+    <b>lignes STM</b> associées (via cette rue) + le <b>tracé complet</b>
+    de chaque ligne.
+  </div>
+  <div id="map"></div>
+
+  <script>
+    // --- Carte de base ---
+    const map = L.map("map").setView([45.51, -73.57], 13);
+
+    L.tileLayer(
+      "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",
+      {
+        maxZoom: 19,
+        attribution:
+          '&copy; <a href="https://www.openstreetmap.org/copyright">OSM</a> &amp; contributeurs'
+      }
+    ).addTo(map);
+
+    // Couches et légende courantes (pour pouvoir nettoyer à chaque clic)
+    let currentStreetLayer = null;
+    let currentBusLayers = [];
+    let currentLegend = null;
+    let currentPopup = null;
+
+    // Palette de couleurs pour les lignes (cycle si beaucoup de lignes)
+    const lineColors = [
+      "#1f77b4",
+      "#ff7f0e",
+      "#2ca02c",
+      "#d62728",
+      "#9467bd",
+      "#8c564b",
+      "#e377c2",
+      "#7f7f7f",
+      "#bcbd22",
+      "#17becf"
+    ];
+
+    function getColorForRef(ref, usedColors) {
+      if (usedColors[ref]) return usedColors[ref];
+      const color = lineColors[Object.keys(usedColors).length % lineColors.length];
+      usedColors[ref] = color;
+      return color;
+    }
+
+    // Nettoyage des couches avant un nouveau clic
+    function clearPrevious() {
+      if (currentStreetLayer) {
+        map.removeLayer(currentStreetLayer);
+        currentStreetLayer = null;
+      }
+      currentBusLayers.forEach((layer) => map.removeLayer(layer));
+      currentBusLayers = [];
+
+      if (currentLegend) {
+        map.removeControl(currentLegend);
+        currentLegend = null;
+      }
+      if (currentPopup) {
+        map.closePopup(currentPopup);
+        currentPopup = null;
+      }
+    }
+
+    // Convertit la géométrie Overpass (array {lat,lon}) en LatLng[]
+    function geometryToLatLngs(geometry) {
+      return geometry.map((pt) => [pt.lat, pt.lon]);
+    }
+
+    // --- Étape 1 : trouver la rue cliquée (way OSM) ---
+    async function fetchStreetAt(latlng) {
+      const radiusMeters = 10; // petit rayon suffisant pour toucher la rue
+
+      const query = `
+        [out:json][timeout:25];
+        way(around:${radiusMeters},${latlng.lat},${latlng.lng})
+          ["highway"]
+          ["name"];
+        out geom 1;
+      `;
+
+      const url =
+        "https://overpass-api.de/api/interpreter?data=" +
+        encodeURIComponent(query);
+
+      const response = await fetch(url);
+      if (!response.ok) {
+        throw new Error("Erreur Overpass (way)");
+      }
+      const data = await response.json();
+
+      if (!data.elements || data.elements.length === 0) {
+        return null;
+      }
+
+      // On prend le premier way trouvé (le plus proche)
+      const way = data.elements[0];
+      return way;
+    }
+
+    // --- Étape 2 : trouver les lignes STM qui utilisent CE way ---
+    async function fetchBusRoutesForWay(way) {
+      const wayId = way.id;
+
+      // On récupère :
+      // - les relations de type route=bus qui contiennent ce wayId
+      // - tous leurs membres (ways + nodes) avec géométrie
+      const query = `
+        [out:json][timeout:25];
+        rel["route"="bus"](bw:${wayId});
+        (._; >;);
+        out geom;
+      `;
+
+      const url =
+        "https://overpass-api.de/api/interpreter?data=" +
+        encodeURIComponent(query);
+
+      const response = await fetch(url);
+      if (!response.ok) {
+        throw new Error("Erreur Overpass (routes)");
+      }
+      const data = await response.json();
+      if (!data.elements || data.elements.length === 0) {
+        return { relations: [], waysById: {} };
+      }
+
+      const relations = data.elements.filter((el) => el.type === "relation");
+      const waysById = {};
+      data.elements
+        .filter((el) => el.type === "way" && el.geometry)
+        .forEach((w) => {
+          waysById[w.id] = w;
+        });
+
+      return { relations, waysById };
+    }
+
+    // --- Étape 3 : dessiner rue + lignes + popup + légende ---
+    function drawStreetAndRoutes(clickedLatLng, streetWay, routesData) {
+      const streetName = streetWay.tags && streetWay.tags.name
+        ? streetWay.tags.name
+        : "(rue sans nom)";
+
+      // 1) Tracé de la rue sélectionnée
+      const streetLatLngs = geometryToLatLngs(streetWay.geometry);
+      currentStreetLayer = L.polyline(streetLatLngs, {
+        color: "#000000",
+        weight: 6,
+        opacity: 0.5
+      }).addTo(map);
+
+      map.fitBounds(currentStreetLayer.getBounds(), {
+        padding: [60, 60]
+      });
+
+      // 2) Traitement des relations / lignes
+      const { relations, waysById } = routesData;
+
+      if (!relations || relations.length === 0) {
+        // Aucune ligne pour ce tronçon
+        const popupHtml =
+          "<b>Rue :</b> " +
+          streetName +
+          "<br><b>Lignes STM :</b> Aucune donnée";
+
+        currentPopup = L.popup()
+          .setLatLng(clickedLatLng)
+          .setContent(popupHtml)
+          .openOn(map);
+
+        return;
+      }
+
+      // Regrouper par ref (numéro de ligne, ex : 24, 105, 138…)
+      const lines = {}; // ref -> { ref, name, color, polylines: [] }
+      const usedColors = {};
+
+      relations.forEach((rel) => {
+        const ref = rel.tags && rel.tags.ref ? rel.tags.ref : "?";
+        const lineName = rel.tags && rel.tags.name ? rel.tags.name : "";
+        const key = ref;
+
+        if (!lines[key]) {
+          lines[key] = {
+            ref,
+            name: lineName,
+            polylines: []
+          };
+        }
+
+        // Construire le tracé pour cette relation à partir de ses members "way"
+        const wayMembers = (rel.members || []).filter(
+          (m) => m.type === "way" && waysById[m.ref]
+        );
+
+        wayMembers.forEach((m) => {
+          const w = waysById[m.ref];
+          if (w && w.geometry) {
+            const coords = geometryToLatLngs(w.geometry);
+            lines[key].polylines.push(coords);
+          }
+        });
+      });
+
+      // 3) Dessiner chaque ligne sur la carte
+      const lineRefsSorted = Object.keys(lines).sort((a, b) =>
+        a.localeCompare(b, "fr", { numeric: true })
+      );
+
+      lineRefsSorted.forEach((ref) => {
+        const line = lines[ref];
+        const color = getColorForRef(ref, usedColors);
+
+        line.polylines.forEach((coords) => {
+          const poly = L.polyline(coords, {
+            color: color,
+            weight: 4,
+            opacity: 0.9
+          }).addTo(map);
+
+          currentBusLayers.push(poly);
+        });
+      });
+
+      // 4) Popup
+      const popupHtml =
+        "<b>Rue :</b> " +
+        streetName +
+        "<br><b>Lignes STM :</b> " +
+        (lineRefsSorted.length > 0 ? lineRefsSorted.join(", ") : "Aucune donnée");
+
+      currentPopup = L.popup()
+        .setLatLng(clickedLatLng)
+        .setContent(popupHtml)
+        .openOn(map);
+
+      // 5) Légende des lignes avec couleurs
+      currentLegend = L.control({ position: "bottomleft" });
+      currentLegend.onAdd = function () {
+        const div = L.DomUtil.create("div", "legend");
+        div.innerHTML = '<div class="legend-title">Lignes STM</div>';
+
+        lineRefsSorted.forEach((ref) => {
+          const color = usedColors[ref];
+          const lineDiv = document.createElement("div");
+          lineDiv.className = "legend-line";
+
+          const colorBox = document.createElement("span");
+          colorBox.className = "legend-color";
+          colorBox.style.backgroundColor = color;
+
+          const label = document.createElement("span");
+          label.textContent = "Ligne " + ref;
+
+          lineDiv.appendChild(colorBox);
+          lineDiv.appendChild(label);
+          div.appendChild(lineDiv);
+        });
+
+        // Si aucune, on l'affiche aussi (mais normalement on est déjà sorti plus haut)
+        if (lineRefsSorted.length === 0) {
+          const noData = document.createElement("div");
+          noData.textContent = "Aucune donnée";
+          div.appendChild(noData);
+        }
+
+        return div;
+      };
+      currentLegend.addTo(map);
+    }
+
+    // --- Gestion du clic sur la carte ---
+    map.on("click", async (e) => {
+      clearPrevious();
+
+      const clickedLatLng = e.latlng;
+
+      try {
+        // 1) Récupérer la rue
+        const streetWay = await fetchStreetAt(clickedLatLng);
+        if (!streetWay) {
+          currentPopup = L.popup()
+            .setLatLng(clickedLatLng)
+            .setContent(
+              "<b>Aucune rue trouvée ici.</b><br>Essaye de cliquer directement sur une rue."
+            )
+            .openOn(map);
+          return;
+        }
+
+        // 2) Récupérer les lignes STM qui utilisent CE way (via bw:wayId)
+        const routesData = await fetchBusRoutesForWay(streetWay);
+
+        // 3) Dessiner le tout
+        drawStreetAndRoutes(clickedLatLng, streetWay, routesData);
+      } catch (err) {
+        console.error(err);
+        currentPopup = L.popup()
+          .setLatLng(clickedLatLng)
+          .setContent(
+            "<b>Erreur lors du chargement des données.</b><br>Réessaie dans un instant."
+          )
+          .openOn(map);
+      }
+    });
+  </script>
+</body>
+</html>
