@@ -1,92 +1,106 @@
 <!DOCTYPE html>
 <html lang="fr">
+
 <head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta charset="UTF-8" />
+  <title>Détours STM</title>
 
-<title>Détour STM</title>
+  <!-- Leaflet CSS -->
+  <link rel="stylesheet"
+    href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+    crossorigin="" />
 
-<!-- Leaflet -->
-<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
-<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <style>
+    html, body {
+      margin: 0;
+      padding: 0;
+      height: 100%;
+    }
 
-<style>
-  body { margin:0; padding:0; }
-  #map { width:100%; height:90vh; }
-  #panel {
-    background:white;
-    padding:10px;
-    font-size:18px;
-    border-bottom:2px solid #ccc;
-  }
-  input {
-    font-size:18px;
-    padding:5px;
-    width:120px;
-  }
-  button {
-    background:#ff4444;
-    color:white;
-    padding:10px 15px;
-    font-size:18px;
-    border:none;
-    border-radius:8px;
-    margin-left:10px;
-  }
-</style>
+    #map {
+      width: 100%;
+      height: 100%;
+    }
+
+    .floating-buttons {
+      position: absolute;
+      top: 10px;
+      right: 10px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      z-index: 1000;
+    }
+
+    .floating-buttons button {
+      padding: 8px 12px;
+      background: #0072bc;
+      color: white;
+      border: none;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 15px;
+      font-weight: bold;
+    }
+
+    .floating-buttons button:hover {
+      background: #005a95;
+    }
+  </style>
 </head>
 
 <body>
 
-<div id="panel">
-  Ligne bus :
-  <input id="bus" placeholder="186">
-  <button onclick="resetDetour()">Effacer détour</button>
-  <br><br>
-  1er clic : <b>début du détour</b> — 2e clic : <b>fin du détour</b> → calcul automatique
-</div>
+  <!-- CARTE -->
+  <div id="map"></div>
 
-<div id="map"></div>
+  <!-- BOUTONS AVANT / APRÈS -->
+  <div class="floating-buttons">
+    <button id="avant">Avant</button>
+    <button id="apres">Après</button>
+  </div>
 
-<script>
-// ======= TA CLÉ API (déjà mise) =======
-const API_KEY = "1adf955d-015a-43ae-a58b-0e3c04d6a8d4";
+  <!-- Leaflet JS -->
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+    crossorigin=""></script>
 
-// ======= CARTE =======
-let map = L.map('map').setView([45.55, -73.55], 14);
+  <script>
+    // 1. Initialisation de la carte sur Montréal
+    const map = L.map('map').setView([45.508, -73.587], 12);
 
-L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
-  maxZoom: 19,
-  attribution: '&copy; OpenStreetMap'
-}).addTo(map);
+    // 2. Fond de carte OpenStreetMap
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      maxZoom: 19,
+      attribution: '© OpenStreetMap'
+    }).addTo(map);
 
-// ======= VARIABLES GLOBALES =======
-let click1 = null;
-let click2 = null;
-let marker1 = null;
-let marker2 = null;
-let routeLine = null;
+    // 3. Exemple : un arrêt (Berri-UQAM)
+    const arret = L.marker([45.5151, -73.5619]).addTo(map);
+    arret.bindPopup("Arrêt STM – Berri-UQAM");
 
-// ======= CLIC SUR LA CARTE =======
-map.on("click", (e) => {
-  if (!click1) {
-    // premier clic = début du détour
-    click1 = e.latlng;
-    marker1 = L.marker(click1).addTo(map);
-    marker1.bindPopup("Début du détour").openPopup();
-    return;
-  }
+    // 4. Exemple : un petit tracé de ligne de bus
+    const ligne = [
+      [45.5295, -73.6100], 
+      [45.5225, -73.5980],
+      [45.5180, -73.5820],
+      [45.5151, -73.5619]
+    ];
 
-  if (!click2) {
-    // deuxième clic = fin du détour
-    click2 = e.latlng;
-    marker2 = L.marker(click2).addTo(map);
-    marker2.bindPopup("Fin du détour").openPopup();
-    calculDetour();
-  }
-});
+    L.polyline(ligne, {
+      color: "#0072bc",
+      weight: 5,
+      opacity: 0.9
+    }).addTo(map);
 
-// ======= RESET =======
-function resetDetour() {
-  click1 = null;
-  click
+    // 5. Boutons AVANT / APRÈS – tu mettras ta logique plus tard
+    document.getElementById("avant").onclick = () => {
+      alert("Vue AVANT : à remplacer par ta vraie logique plus tard.");
+    };
+
+    document.getElementById("apres").onclick = () => {
+      alert("Vue APRÈS : à remplacer par ta vraie logique.");
+    };
+  </script>
+
+</body>
+</html>
