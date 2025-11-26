@@ -1,176 +1,306 @@
 <!DOCTYPE html>
 <html lang="fr">
 <head>
-<meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>Détours STM – Stable No-Block</title>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Détours STM – Rue + lignes STM (multi-ways corrigé + cache)</title>
 
-<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
-<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <!-- Leaflet -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 
-<style>
-  html, body { height: 100%; margin:0; padding:0; }
-  #map { height:100%; width:100%; }
-  #panel {
-    position:absolute; top:10px; left:10px; right:10px;
-    background:white; padding:10px; border-radius:12px;
-    font-size:18px; z-index:1000;
-    box-shadow:0 4px 12px rgba(0,0,0,0.25);
-  }
-</style>
+  <style>
+    html, body {
+      height: 100%;
+      margin: 0;
+      padding: 0;
+    }
+
+    #map {
+      height: 100%;
+      width: 100%;
+    }
+
+    #panel {
+      position: absolute;
+      top: 10px;
+      left: 10px;
+      right: 10px;
+      background: white;
+      padding: 10px;
+      border-radius: 10px;
+      z-index: 1000;
+      box-shadow: 0 4px 10px rgba(0,0,0,0.25);
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      font-size: 15px;
+      line-height: 1.4;
+    }
+
+    #legend {
+      position: absolute;
+      left: 10px;
+      bottom: 10px;
+      background: white;
+      padding: 8px 10px;
+      border-radius: 8px;
+      z-index: 1000;
+      box-shadow: 0 2px 6px rgba(0,0,0,0.25);
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      font-size: 14px;
+      max-height: 40%;
+      overflow-y: auto;
+      display: none; /* caché par défaut */
+    }
+
+    #legend h4 {
+      margin: 0 0 4px 0;
+      font-size: 14px;
+    }
+
+    #legend ul {
+      list-style: none;
+      padding: 0;
+      margin: 0;
+    }
+
+    #legend li::before {
+      content: "● ";
+      /* même couleur que le tracé */
+    }
+  </style>
 </head>
 
 <body>
 
 <div id="panel">
-👉 Clique une rue : j’affiche la rue EXACTE + les lignes STM + tracé.  
-💡 **Version ultra-stable (anti-bug “Recherche…”)**
+  👉 Clique une rue : j’affiche la rue <b>EXACTE</b> (multi-ways corrigé) + les
+  <b>lignes STM</b> associées + le <b>tracé</b>.  
+  (Requêtes Overpass robustes avec <b>cache</b> si le service est lent.)
+</div>
+
+<div id="legend">
+  <h4>Lignes STM</h4>
+  <ul></ul>
 </div>
 
 <div id="map"></div>
 
 <script>
-const map = L.map("map").setView([45.508, -73.587], 13);
-L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png").addTo(map);
+  // --- Carte Leaflet ---
+  const map = L.map("map").setView([45.508, -73.587], 13);
+  L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
+    maxZoom: 19,
+    attribution: "&copy; OpenStreetMap"
+  }).addTo(map);
 
-let activeRoad = [];
+  let activeRoadSegments = [];
+  const streetCache = {}; // cache par nom de rue : { lines:[], ways:[] }
 
-// Timeout sécurisé
-function timeoutPromise(ms) {
-  return new Promise((resolve, reject) =>
-    setTimeout(() => reject("timeout"), ms)
-  );
-}
+  const legendEl = document.getElementById("legend");
+  const legendList = legendEl.querySelector("ul");
 
-// Effacer
-function clearMap() {
-  activeRoad.forEach(l => map.removeLayer(l));
-  activeRoad = [];
-}
-
-// 1️⃣ Way cliqué
-async function getClickedWay(lat, lng) {
-  const q = `
-    [out:json][timeout:3];
-    way(around:20, ${lat}, ${lng})["highway"]["name"];
-    out geom;
-  `;
-
-  try {
-    const res = await Promise.race([
-      fetch("https://overpass-api.de/api/interpreter", { method:"POST", body:q }),
-      timeoutPromise(2500)
-    ]);
-    const json = await res.json();
-    return json.elements[0] || null;
-  } catch (e) {
-    return null;
-  }
-}
-
-// 2️⃣ Tous les segments
-async function getStreetSegments(name, lat, lng) {
-  const q = `
-    [out:json][timeout:3];
-    way(around:40, ${lat}, ${lng})["highway"]["name"="${name}"];
-    out geom;
-  `;
-  try {
-    const res = await Promise.race([
-      fetch("https://overpass-api.de/api/interpreter", { method:"POST", body:q }),
-      timeoutPromise(2500)
-    ]);
-    const json = await res.json();
-    return json.elements.filter(e => e.type === "way");
-  } catch (e) {
-    return [];
-  }
-}
-
-// 3️⃣ Lignes STM sur way
-async function getLines(wayId) {
-  const q = `
-    [out:json][timeout:3];
-    relation["route"="bus"](way(${wayId}));
-    out tags;
-  `;
-  try {
-    const res = await Promise.race([
-      fetch("https://overpass-api.de/api/interpreter", { method:"POST", body:q }),
-      timeoutPromise(2500)
-    ]);
-    const json = await res.json();
-    return json.elements.map(r => r.tags.ref).filter(Boolean);
-  } catch {
-    return [];
-  }
-}
-
-// 4️⃣ tracer
-function drawSeg(way) {
-  const c = way.geometry.map(p => [p.lat, p.lon]);
-  const l = L.polyline(c, { color:"blue", weight:5 }).addTo(map);
-  activeRoad.push(l);
-}
-
-// 🖱️ CLIC
-map.on("click", async e => {
-  clearMap();
-
-  const popup = L.popup()
-    .setLatLng(e.latlng)
-    .setContent("Recherche…")
-    .openOn(map);
-
-  const { lat, lng } = e.latlng;
-
-  // Étape 1 : rue cliquée
-  const clicked = await getClickedWay(lat, lng);
-  if (!clicked) {
-    popup.setContent("Rue introuvable");
-    return;
+  // Effacer les tracés existants
+  function clearMap() {
+    activeRoadSegments.forEach(l => map.removeLayer(l));
+    activeRoadSegments = [];
+    updateLegend([]);
   }
 
-  const name = clicked.tags.name;
+  // Met à jour la légende des lignes STM
+  function updateLegend(lines) {
+    legendList.innerHTML = "";
+    const uniq = [...new Set(lines)].filter(Boolean);
 
-  // Étape 2 : tous les segments
-  const segments = await getStreetSegments(name, lat, lng);
+    if (!uniq.length) {
+      legendEl.style.display = "none";
+      return;
+    }
 
-  if (segments.length === 0) {
-    popup.setContent(`<b>Rue :</b> ${name}<br>Aucun segment trouvé.`);
-    return;
+    uniq.sort((a, b) =>
+      a.localeCompare(b, "fr", { numeric: true, sensitivity: "base" })
+    );
+
+    uniq.forEach(ref => {
+      const li = document.createElement("li");
+      li.textContent = "Ligne " + ref;
+      legendList.appendChild(li);
+    });
+
+    legendEl.style.display = "block";
   }
 
-  // Étape 3 : lignes STM sur chaque segment
-  let all = new Set();
-  let valids = [];
+  // Appel Overpass avec timeout
+  async function callOverpass(query, timeoutMs = 15000) {
+    const controller = new AbortController();
+    const id = setTimeout(() => controller.abort(), timeoutMs);
 
-  for (const s of segments) {
-    const lines = await getLines(s.id);
+    try {
+      const res = await fetch("https://overpass-api.de/api/interpreter", {
+        method: "POST",
+        body: query,
+        signal: controller.signal
+      });
 
-    if (lines.length > 0) {
-      lines.forEach(x => all.add(x));
-      valids.push(s);
+      if (!res.ok) {
+        throw new Error("HTTP " + res.status);
+      }
+
+      return await res.json();
+    } finally {
+      clearTimeout(id);
     }
   }
 
-  // Si aucun segment n’a de lignes STM → on affiche quand même
-  if (valids.length === 0) {
-    popup.setContent(`
-      <b>Rue :</b> ${name}<br>
-      <b>Lignes STM :</b> Aucune donnée.
-    `);
-    return;
+  // Trouver la rue exacte cliquée (un seul way)
+  async function getClickedStreet(lat, lng) {
+    const query = `
+      [out:json][timeout:20];
+      way(around:25, ${lat}, ${lng})["highway"]["name"];
+      out body;
+    `;
+    const json = await callOverpass(query, 15000);
+    if (!json.elements || !json.elements.length) return null;
+    return json.elements[0]; // premier way trouvé
   }
 
-  // Tracer les bons segments
-  valids.forEach(drawSeg);
+  // Obtenir tous les segments de cette rue + les relations bus qui les utilisent
+  async function getStreetWaysAndBusLines(streetName, lat, lng) {
+    const safeName = streetName.replace(/"/g, '\\"');
 
-  popup.setContent(`
-    <b>Rue :</b> ${name}<br>
-    <b>Lignes STM :</b> ${[...all].join(", ")}
-  `);
-});
+    // 1) tous les ways de cette rue autour du clic
+    // 2) toutes les relations route=bus qui utilisent ces ways (bw.street)
+    const query = `
+      [out:json][timeout:25];
+      (way(around:80, ${lat}, ${lng})["highway"]["name"="${safeName}"];)->.street;
+      rel["route"="bus"](bw.street);
+      out tags;
+      way.street;
+      out geom;
+    `;
+
+    const json = await callOverpass(query, 20000);
+
+    const relations = json.elements.filter(el => el.type === "relation");
+    const ways = json.elements.filter(el => el.type === "way" && Array.isArray(el.geometry));
+
+    const lines = [...new Set(
+      relations
+        .map(r => r.tags && r.tags.ref)
+        .filter(Boolean)
+    )];
+
+    return { lines, ways };
+  }
+
+  // Dessiner un segment de rue
+  function drawRoadSegment(way) {
+    if (!way.geometry || !way.geometry.length) return;
+
+    const coords = way.geometry.map(p => [p.lat, p.lon]);
+    const poly = L.polyline(coords, {
+      color: "blue",
+      weight: 5
+    }).addTo(map);
+
+    activeRoadSegments.push(poly);
+  }
+
+  // Gestion du clic
+  map.on("click", async (e) => {
+    clearMap();
+
+    const lat = e.latlng.lat;
+    const lng = e.latlng.lng;
+
+    const popup = L.popup()
+      .setLatLng(e.latlng)
+      .setContent("Recherche…")
+      .openOn(map);
+
+    let clickedWay;
+    try {
+      clickedWay = await getClickedStreet(lat, lng);
+    } catch (err) {
+      console.error("Erreur Overpass (rue cliquée) :", err);
+      popup.setContent("Rue introuvable (erreur Overpass).");
+      return;
+    }
+
+    if (!clickedWay || !clickedWay.tags || !clickedWay.tags.name) {
+      popup.setContent("Rue introuvable (aucun nom trouvé dans OSM).");
+      return;
+    }
+
+    const streetName = clickedWay.tags.name;
+    let lines = [];
+    let ways = [];
+    let liveOk = false;
+
+    // 1) tentative live Overpass
+    try {
+      const result = await getStreetWaysAndBusLines(streetName, lat, lng);
+      lines = result.lines;
+      ways = result.ways;
+      liveOk = true;
+
+      // On met à jour le cache pour cette rue
+      streetCache[streetName] = {
+        lines: lines,
+        ways: ways
+      };
+    } catch (err) {
+      console.error("Erreur Overpass (ways + bus) :", err);
+      liveOk = false;
+    }
+
+    // 2) Fallback cache si Overpass a échoué
+    if (!liveOk) {
+      const cached = streetCache[streetName];
+      if (cached) {
+        lines = cached.lines || [];
+        ways = cached.ways || [];
+
+        ways.forEach(drawRoadSegment);
+        updateLegend(lines);
+
+        const info = lines.length
+          ? lines.join(", ") + " (cache)"
+          : "Données live indisponibles (cache utilisé)";
+
+        popup.setContent(
+          `<b>Rue :</b> ${streetName}<br>` +
+          `<b>Lignes STM :</b> ${info}`
+        );
+        return;
+      } else {
+        popup.setContent(
+          `<b>Rue :</b> ${streetName}<br>` +
+          `<b>Lignes STM :</b> Données live indisponibles (pas de cache)`
+        );
+        return;
+      }
+    }
+
+    // 3) Live OK mais aucun way / aucune ligne
+    if (!ways.length) {
+      popup.setContent(
+        `<b>Rue :</b> ${streetName}<br>` +
+        `<b>Lignes STM :</b> Aucune donnée`
+      );
+      updateLegend([]);
+      return;
+    }
+
+    ways.forEach(drawRoadSegment);
+    updateLegend(lines);
+
+    popup.setContent(
+      `<b>Rue :</b> ${streetName}<br>` +
+      `<b>Lignes STM :</b> ${
+        lines.length ? lines.join(", ") : "Aucune donnée"
+      }`
+    );
+  });
 </script>
 
 </body>
