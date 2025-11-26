@@ -1,63 +1,28 @@
-<!DOCTYPE html>
-<html lang="fr">
-<head>
-<meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Détours STM</title>
-
-<!-- Leaflet -->
-<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
-<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-
-<style>
-  html, body {
-    height: 100%;
-    margin: 0;
-    padding: 0;
-  }
-  #map {
-    height: 100%;
-    width: 100%;
-  }
-
-  .floatingBox {
-    position: fixed;
-    top: 10px;
-    left: 10px;
-    background: white;
-    padding: 12px;
-    border-radius: 12px;
-    font-size: 18px;
-    max-width: 90%;
-    box-shadow: 0 0 8px rgba(0,0,0,0.25);
-    z-index: 9999;
-  }
-</style>
-</head>
-
-<body>
-
-<div class="floatingBox">
-👉 Clique une rue : j'affiche la rue EXACTE + les lignes STM + le tracé.
-</div>
-
-<div id="map"></div>
-
-<script>
-/* 🔵 INITIALISATION DE LA MAP */
-const map = L.map("map").setView([45.5048, -73.5772], 15);
-
-L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
-  maxZoom: 19,
-}).addTo(map);
-
-let currentPolyline = null;
-
-/* 🔵 NORMALISATION : transforme toute variante → clé canonique */
 function normalizeStreetName(name) {
-  const n = name.toLowerCase();
+  if (!name) return "";
 
-  if (n.includes("sherbrooke")) return "SHERBROOKE";
+  const n = name.toLowerCase().trim();
+
+  // 🔵 Toutes les variantes possibles de SHERBROOKE
+  const sherbrookePatterns = [
+    "sherbrooke",
+    "sherbrooke ouest",
+    "sherbrooke west",
+    "rue sherbrooke",
+    "rue sherbrooke ouest",
+    "sherbrooke st",
+    "sherbrooke st w",
+    "sherbrooke street",
+    "sherbrooke street west",
+    "ave sherbrooke",
+    "avenue sherbrooke"
+  ];
+
+  if (sherbrookePatterns.some(p => n.includes(p))) {
+    return "SHERBROOKE";
+  }
+
+  // 🔵 Autres rues existantes
   if (n.includes("peel")) return "PEEL";
   if (n.includes("crescent")) return "CRESCENT";
   if (n.includes("guy")) return "GUY";
@@ -66,79 +31,3 @@ function normalizeStreetName(name) {
 
   return name.toUpperCase();
 }
-
-/* 🔵 BASE DE DONNÉES STM — normalisée */
-const stmDatabase = {
-  "SHERBROOKE": ["24", "105", "138", "356"],
-  "PEEL": ["107"],
-  "GUY": ["66", "435"],
-  "SAINTE-CATHERINE": ["15"],
-  "CRESCENT": []
-};
-
-/* 🔵 Trouve lignes STM */
-function findSTMlines(name) {
-  const key = normalizeStreetName(name);
-  return stmDatabase[key] || [];
-}
-
-/* 🔵 CLIC SUR LA CARTE → détecte la vraie rue */
-map.on("click", async function (e) {
-  const lat = e.latlng.lat;
-  const lon = e.latlng.lng;
-
-  const url = `
-    https://overpass-api.de/api/interpreter?data=[out:json];
-    way(around:15,${lat},${lon})["highway"]["name"];
-    (._;>;);
-    out;
-  `.replace(/\s+/g, "");
-
-  try {
-    const r = await fetch(url);
-    const data = await r.json();
-    if (!data.elements.length) return;
-
-    /* Récupère le 1er way avec name */
-    const way = data.elements.find(el => el.type === "way" && el.tags && el.tags.name);
-    if (!way) return;
-
-    const streetName = way.tags.name;
-
-    /* 🔵 Normalisation pour STM */
-    const stmKey = normalizeStreetName(streetName);
-    const stmLines = findSTMlines(streetName);
-
-    /* 🔵 TRACÉ : liste des nodes → lat/lng */
-    const nodes = way.nodes
-      .map(nid => data.elements.find(el => el.id === nid && el.type === "node"))
-      .filter(Boolean)
-      .map(n => [n.lat, n.lon]);
-
-    if (currentPolyline) map.removeLayer(currentPolyline);
-
-    currentPolyline = L.polyline(nodes, {
-      color: "blue",
-      weight: 6,
-      opacity: 0.7
-    }).addTo(map);
-
-    /* 🔵 Popup */
-    const popupContent = `
-      <b>Rue :</b> ${streetName}<br>
-      <b>Lignes STM :</b> ${stmLines.length ? stmLines.join(", ") : "Aucune donnée"}
-    `;
-
-    L.popup()
-      .setLatLng(e.latlng)
-      .setContent(popupContent)
-      .openOn(map);
-
-  } catch (err) {
-    console.error("Erreur Overpass:", err);
-  }
-});
-</script>
-
-</body>
-</html>
