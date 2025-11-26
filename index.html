@@ -3,8 +3,9 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Détours STM – Toutes les lignes</title>
+  <title>Détours STM – Démo rues</title>
 
+  <!-- Leaflet CSS -->
   <link
     rel="stylesheet"
     href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.css"
@@ -19,12 +20,14 @@
       font-family: sans-serif;
     }
 
+    /* Carte plein écran */
     #map {
       position: absolute;
       inset: 0;
       z-index: 1;
     }
 
+    /* Panneau flottant en haut */
     #panel {
       position: absolute;
       top: 10px;
@@ -57,132 +60,4 @@
 
   <div id="panel">
     <label>Ligne bus :</label>
-    <input id="ligne" type="text" placeholder="(facultatif, filtre après)">
-
-    <br><br>
-
-    <button id="clearBtn">Effacer tracés</button>
-
-    <p style="margin-top:10px;">
-      Clique sur la carte (sur ou près d’une rue) :<br>
-      → j’affiche toutes les <b>lignes STM</b> dont le tracé passe à proximité.<br>
-      (Données complètes GTFS STM à partir de <code>stm_lignes.json</code>.)
-    </p>
-  </div>
-
-  <div id="map"></div>
-
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.js"></script>
-
-  <script>
-    const map = L.map('map');
-    L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
-      maxZoom: 19
-    }).addTo(map);
-    map.setView([45.52, -73.57], 12);
-
-    // Toutes les routes STM (chargées depuis stm_lignes.json)
-    let routes = [];
-    let displayedLines = [];
-
-    function clearLines() {
-      displayedLines.forEach(l => map.removeLayer(l));
-      displayedLines = [];
-    }
-
-    document.getElementById("clearBtn").onclick = clearLines;
-
-    // distance en mètres
-    function distanceMeters(lat1, lon1, lat2, lon2) {
-      const R = 6371000;
-      const dLat = (lat2 - lat1) * Math.PI / 180;
-      const dLon = (lon2 - lon1) * Math.PI / 180;
-
-      const a =
-        Math.sin(dLat / 2) ** 2 +
-        Math.cos(lat1 * Math.PI / 180) *
-        Math.cos(lat2 * Math.PI / 180) *
-        Math.sin(dLon / 2) ** 2;
-
-      return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-    }
-
-    // Retourne les routes proches d’un point
-    function routesProches(lat, lng, maxDistanceMeters = 80) {
-      const filt = document.getElementById("ligne").value.trim();
-      const result = [];
-
-      routes.forEach(route => {
-        // si champ "Ligne bus" rempli, on filtre par numéro
-        if (filt && route.short_name && route.short_name !== filt) return;
-
-        let proche = false;
-
-        for (const shape of route.shapes) {
-          for (const coord of shape) {
-            const d = distanceMeters(lat, lng, coord[0], coord[1]);
-            if (d <= maxDistanceMeters) {
-              proche = true;
-              break;
-            }
-          }
-          if (proche) break;
-        }
-
-        if (proche) {
-          result.push(route);
-        }
-      });
-
-      return result;
-    }
-
-    // Clic sur la carte
-    map.on("click", (e) => {
-      const lat = e.latlng.lat;
-      const lng = e.latlng.lng;
-
-      clearLines();
-
-      const trouvées = routesProches(lat, lng);
-
-      trouvées.forEach(route => {
-        const col = route.color && route.color !== "#000000"
-          ? route.color
-          : "#0072bc";
-
-        route.shapes.forEach(shapeCoords => {
-          const poly = L.polyline(shapeCoords, {
-            color: col,
-            weight: 3,
-            opacity: 0.8
-          }).addTo(map);
-          displayedLines.push(poly);
-        });
-      });
-
-      const noms = trouvées.length > 0
-        ? trouvées.map(r => r.short_name || r.route_id).join(", ")
-        : "aucune";
-
-      L.popup()
-        .setLatLng(e.latlng)
-        .setContent("<b>Lignes STM proches :</b> " + noms)
-        .openOn(map);
-    });
-
-    // Charger stm_lignes.json
-    fetch("stm_lignes.json")
-      .then(res => res.json())
-      .then(data => {
-        routes = data;
-        console.log("Routes STM chargées :", routes.length);
-      })
-      .catch(err => {
-        console.error("Erreur de chargement stm_lignes.json :", err);
-        alert("Impossible de charger stm_lignes.json. Assure-toi qu'il est à la racine du repo.");
-      });
-  </script>
-
-</body>
-</html>
+    <input id="
