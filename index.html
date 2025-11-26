@@ -5,117 +5,76 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Détours STM</title>
 
-    <!-- Leaflet -->
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 
     <style>
-        html, body {
-            height: 100%;
-            margin: 0;
-            padding: 0;
-        }
-
-        #map {
-            height: 100%;
-            width: 100%;
-        }
-
+        html, body { height: 100%; margin: 0; padding: 0; }
+        #map { height: 100%; width: 100%; }
         .info-box {
             position: absolute;
-            top: 10px;
-            left: 10px;
+            top: 10px; left: 10px;
+            background: white; padding: 15px;
+            border-radius: 10px; font-size: 18px;
+            box-shadow: 0 0 10px rgba(0,0,0,0.2);
             z-index: 1000;
-            background: white;
-            padding: 14px;
-            border-radius: 12px;
-            font-size: 18px;
-            box-shadow: 0px 0px 10px rgba(0,0,0,0.2);
         }
     </style>
 </head>
 <body>
 
-<div class="info-box">👉 Clique une rue : j’affiche la rue EXACTE + les lignes STM.</div>
+<div class="info-box">👉 Clique une rue : j’affiche la rue EXACTE + lignes STM + tracé.</div>
 <div id="map"></div>
 
 <script>
-// ===============================
-// 🗺️ 1. INITIALISATION CARTE
-// ===============================
 const map = L.map("map").setView([45.5017, -73.5673], 15);
+L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom: 19 }).addTo(map);
 
-L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
-    maxZoom: 19
-}).addTo(map);
-
-// ===============================
-// 🟣 2. LAYER POUR LA LIGNE CLIQUÉE
-// ===============================
 let streetLayer = L.geoJSON(null, {
     style: { color: "#7c00ff", weight: 6 }
 }).addTo(map);
 
-// ===============================
-// 🚍 3. LISTE DES LIGNES STM (simplifiée)
-// ===============================
 const stmLines = [
-    { name: "24", streets: ["Sherbrooke", "Rue Sherbrooke Ouest", "Rue Sherbrooke Est"] },
-    { name: "105", streets: ["Sherbrooke", "Rue Sherbrooke Ouest"] },
-    { name: "138", streets: ["Sherbrooke", "Rue Sherbrooke Ouest"] },
-    { name: "356", streets: ["Sherbrooke", "Rue Sherbrooke Ouest"] }
+    { name: "24", streets: ["Sherbrooke"] },
+    { name: "105", streets: ["Sherbrooke"] },
+    { name: "138", streets: ["Sherbrooke"] },
+    { name: "356", streets: ["Sherbrooke"] }
 ];
 
-// ===============================
-// 🎯 4. DÉTECTION DE LA RUE CLIQUÉE
-// ===============================
-map.on("click", async function (e) {
+map.on("click", async function(e) {
     const lat = e.latlng.lat;
     const lon = e.latlng.lng;
 
-    // Reverse geocoding
-    const url = `https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lon}&format=json`;
-    const data = await fetch(url).then(r => r.json());
+    const reverseUrl = `https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lon}&format=json`;
+    const data = await fetch(reverseUrl).then(r => r.json());
 
-    if (!data || !data.address || !data.address.road) {
-        alert("Impossible de détecter cette rue.");
+    if (!data.address || !data.address.road) {
+        alert("Rue inconnue.");
         return;
     }
 
     const street = data.address.road;
 
-    // ===============================
-    // 🚌 TROUVER LES LIGNES STM ASSOCIÉES
-    // ===============================
-    const matchingLines = stmLines
+    const matching = stmLines
         .filter(l => l.streets.some(s => street.includes(s)))
         .map(l => l.name);
 
-    // ===============================
-    // 🟣 AFFICHER LE TRACÉ EXACT DE LA RUE
-    // ===============================
-    streetLayer.clearLayers();
-
     const searchUrl = `https://nominatim.openstreetmap.org/search?street=${encodeURIComponent(street)}&city=Montréal&format=json&polygon_geojson=1`;
+    const json = await fetch(searchUrl).then(r => r.json());
 
-    const streetData = await fetch(searchUrl).then(r => r.json());
-
-    if (streetData.length > 0 && streetData[0].geojson) {
-        streetLayer.addData(streetData[0].geojson);
+    streetLayer.clearLayers();
+    if (json.length > 0 && json[0].geojson) {
+        streetLayer.addData(json[0].geojson);
     }
 
-    // ===============================
-    // 📌 POPUP
-    // ===============================
     L.popup()
         .setLatLng(e.latlng)
         .setContent(`
             <b>Rue :</b> ${street}<br>
-            <b>Lignes STM :</b> ${matchingLines.length ? matchingLines.join(", ") : "Aucune trouvée"}
+            <b>Lignes STM :</b> ${matching.length ? matching.join(", ") : "Aucune"}
         `)
         .openOn(map);
 });
-
 </script>
 
 </body>
