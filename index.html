@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Détours STM – Rue + Segments + Lignes</title>
+  <title>Détours STM – Rue + lignes</title>
 
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
@@ -22,7 +22,7 @@
       border-radius: 10px;
       z-index: 1000;
       box-shadow: 0 4px 10px rgba(0,0,0,0.25);
-      font-size: 16px;
+      font-size: 18px;
     }
   </style>
 </head>
@@ -30,23 +30,22 @@
 <body>
 
 <div id="panel">
-  👉 Clique une rue : j’affiche la rue EXACTE + les lignes STM liées.
+  👉 Clique une rue : j’affiche la rue EXACTE + les lignes STM associées.
 </div>
 
 <div id="map"></div>
 
 <script>
-// --- Initialisation de la carte ---
-const map = L.map('map').setView([45.508, -73.587], 14);
+const map = L.map('map').setView([45.508, -73.587], 13);
 L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png").addTo(map);
 
-// --- ASSOCIATION RUE → LIGNES STM ---
+// --- Exemple : lignes STM pour chaque rue ---
 const streetLines = {
   "Rue Sherbrooke Ouest": ["24", "105", "138", "356"],
   "Rue Sherbrooke Est": ["24", "125", "185", "356"]
 };
 
-// --- Couleurs des lignes ---
+// Couleurs pour les lignes STM
 const lineColors = {
   "24": "blue",
   "105": "red",
@@ -57,24 +56,22 @@ const lineColors = {
 };
 
 let activeSegments = [];
-let activeLines = [];
+let activeBusLines = [];
 
-// Effacer anciens tracés
-function clearSegments() {
+// --- Effacer anciens tracés ---
+function clearAll() {
   activeSegments.forEach(s => map.removeLayer(s));
   activeSegments = [];
+
+  activeBusLines.forEach(l => map.removeLayer(l));
+  activeBusLines = [];
 }
 
-function clearLines() {
-  activeLines.forEach(l => map.removeLayer(l));
-  activeLines = [];
-}
-
-// --- 1) Trouver le NOM EXACT de la rue cliquée ---
+// --- Trouver le NOM EXACT de la rue ---
 async function getStreetName(lat, lng) {
   const query = `
-    [out:json];
-    way(around:15, ${lat}, ${lng})["highway"]["name"];
+    [out:json][timeout:25];
+    way(around:12, ${lat}, ${lng})["highway"]["name"];
     out tags;
   `;
 
@@ -85,46 +82,16 @@ async function getStreetName(lat, lng) {
 
   const json = await res.json();
   if (!json.elements.length) return null;
-
   return json.elements[0].tags.name;
 }
 
-// --- 2) Récupérer TOUS les segments EXACTS de la rue ---
+// --- Récupérer tous les SEGMENTS RÉELS de la rue ---
 async function getStreetSegments(streetName) {
   const query = `
-    [out:json];
-    way["name"="${streetName}"]["highway"];
+    [out:json][timeout:25];
+    way["highway"]["name"="${streetName}"];
     (._;>;);
     out geom;
   `;
 
-  const res = await fetch("https://overpass-api.de/api/interpreter", {
-    method: "POST",
-    body: query
-  });
-
-  const json = await res.json();
-  return json.elements.filter(el => el.type === "way" && el.geometry);
-}
-
-// --- 3) Tracer les segments exacts ---
-function drawStreetSegments(segments) {
-  clearSegments();
-
-  segments.forEach(seg => {
-    const coords = seg.geometry.map(p => [p.lat, p.lon]);
-
-    const poly = L.polyline(coords, {
-      color: "purple",
-      weight: 6
-    }).addTo(map);
-
-    activeSegments.push(poly);
-  });
-}
-
-// --- 4) Tracer les lignes STM associées ---
-function drawLines(lines, lat, lng) {
-  clearLines();
-
-  lines.forEach(num =>
+  const
