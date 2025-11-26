@@ -3,176 +3,204 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Détours STM – Rue + vraies lignes STM</title>
+  <title>Détours STM – Rue + lignes STM</title>
 
   <!-- Leaflet -->
-  <link
-    rel="stylesheet"
-    href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
-  />
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 
   <style>
-    html,
-    body {
+    /* 🔥 FIX MOBILE OBLIGATOIRE POUR VOIR LA CARTE */
+    html, body {
       height: 100%;
-      margin: 0;
+      width: 100%;
       padding: 0;
+      margin: 0;
+    }
+
+    body {
+      overflow: hidden; /* empêche le scroll qui casse Leaflet */
     }
 
     #map {
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
       height: 100%;
       width: 100%;
+      background: #ddd;
+      z-index: 1;
     }
 
     #panel {
       position: absolute;
+      z-index: 9999;
       top: 10px;
       left: 10px;
       right: 10px;
       background: white;
-      padding: 10px;
+      padding: 12px;
       border-radius: 10px;
-      z-index: 1000;
-      box-shadow: 0 4px 10px rgba(0, 0, 0, 0.25);
-      font-family: system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+      box-shadow: 0 4px 10px rgba(0,0,0,0.25);
+      font-family: system-ui, sans-serif;
       font-size: 14px;
     }
 
     #status {
-      margin-top: 4px;
       font-size: 12px;
       color: #666;
+      margin-top: 4px;
     }
   </style>
 </head>
 
 <body>
-  <div id="panel">
-    👉 Clique une rue : j’affiche la rue EXACTE + toutes les lignes STM qui y passent.
-    <div id="status"></div>
-  </div>
 
-  <div id="map"></div>
+<div id="panel">
+  👉 Clique une rue : j’affiche la rue EXACTE + les lignes STM associées.
+  <div id="status"></div>
+</div>
 
-  <script>
-    // ======================= 1. Initialisation carte =======================
-    const map = L.map("map").setView([45.508, -73.587], 13);
+<div id="map"></div>
 
-    L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
-      maxZoom: 19,
-      attribution: "&copy; OpenStreetMap"
+<script>
+/* ============================================================
+   1) INITIALISATION DE LA CARTE
+   ============================================================ */
+
+const map = L.map("map").setView([45.508, -73.587], 13);
+
+L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
+  maxZoom: 19,
+  attribution: "&copy; OpenStreetMap"
+}).addTo(map);
+
+const statusDiv = document.getElementById("status");
+function setStatus(msg) { statusDiv.textContent = msg || ""; }
+
+/* ============================================================
+   2) DESSIN DES SEGMENTS
+   ============================================================ */
+
+let activePolylines = [];
+
+function clearLines() {
+  activePolylines.forEach(p => map.removeLayer(p));
+  activePolylines = [];
+}
+
+function drawSegments(segments) {
+  clearLines();
+  segments.forEach(seg => {
+    if (!seg.geometry || seg.geometry.length < 2) return;
+
+    const coords = seg.geometry.map(pt => [pt.lat, pt.lon]);
+    const poly = L.polyline(coords, {
+      color: "#8a2be2",
+      weight: 6
     }).addTo(map);
 
-    const statusDiv = document.getElementById("status");
-    function setStatus(msg) {
-      statusDiv.textContent = msg || "";
-    }
+    activePolylines.push(poly);
+  });
+}
 
-    // ======================= 2. Gestion des segments dessinés =======================
-    let activeStreetPolylines = [];
+/* ============================================================
+   3) REQUÊTES OVERPASS
+   ============================================================ */
 
-    function clearStreet() {
-      activeStreetPolylines.forEach((p) => map.removeLayer(p));
-      activeStreetPolylines = [];
-    }
+const OVERPASS = "https://overpass-api.de/api/interpreter";
 
-    function drawStreetSegments(segments) {
-      clearStreet();
+async function queryOverpass(q) {
+  const res = await fetch(OVERPASS, {
+    method: "POST",
+    headers: { "Content-Type": "text/plain" },
+    body: q
+  });
+  return await res.json();
+}
 
-      segments.forEach((seg) => {
-        if (!seg.geometry || seg.geometry.length < 2) return;
+async function getStreetName(lat, lng) {
+  const q = `
+    [out:json];
+    way(around:20, ${lat}, ${lng})["highway"]["name"];
+    out tags;
+  `;
+  const j = await queryOverpass(q);
+  return j.elements?.[0]?.tags?.name || null;
+}
 
-        const coords = seg.geometry.map((pt) => [pt.lat, pt.lon]);
+async function getStreetSegments(name, lat, lng) {
+  const q = `
+    [out:json];
+    way(around:250, ${lat}, ${lng})["name"="${name}"]["highway"];
+    out geom;
+  `;
+  const j = await queryOverpass(q);
+  return j.elements || [];
+}
 
-        const poly = L.polyline(coords, {
-          color: "#7b3fe4",        // violet mais cette fois SUR la rue
-          weight: 6,
-          opacity: 0.9
-        }).addTo(map);
+async function getStmLines(segments) {
+  if (!segments.length) return [];
 
-        activeStreetPolylines.push(poly);
-      });
-    }
+  const selectors = segments
+    .map(s => `rel(bw:${s.id})["route"="bus"]["network"~"STM"];`)
+    .join("\n");
 
-    // ======================= 3. Overpass helpers =======================
-    const OVERPASS_URL = "https://overpass-api.de/api/interpreter";
+  const q = `
+    [out:json];
+    (${selectors});
+    out tags;
+  `;
 
-    async function overpassQuery(query) {
-      try {
-        const res = await fetch(OVERPASS_URL, {
-          method: "POST",
-          headers: { "Content-Type": "text/plain" },
-          body: query
-        });
+  const j = await queryOverpass(q);
 
-        if (!res.ok) {
-          throw new Error("HTTP " + res.status);
-        }
+  const refs = new Set();
 
-        return await res.json();
-      } catch (err) {
-        console.error("Erreur Overpass :", err);
-        throw err;
-      }
-    }
+  j.elements?.forEach(rel => {
+    const v = rel.tags?.ref;
+    if (!v) return;
+    v.split(/[,\|]/).map(x => x.trim()).forEach(x => refs.add(x));
+  });
 
-    // ---------- 3.a Trouver le nom EXACT de la rue cliquée ----------
-    async function getStreetName(lat, lng) {
-      const query = `
-        [out:json][timeout:25];
-        way(around:20, ${lat}, ${lng})["highway"]["name"];
-        out tags;
-      `;
+  return [...refs].sort((a,b)=>parseInt(a)-parseInt(b));
+}
 
-      const json = await overpassQuery(query);
+/* ============================================================
+   4) CLIC SUR LA CARTE
+   ============================================================ */
 
-      if (!json.elements || json.elements.length === 0) {
-        return null;
-      }
+map.on("click", async e => {
+  const { lat, lng } = e.latlng;
 
-      // On prend le premier nom trouvé
-      return json.elements[0].tags.name || null;
-    }
+  const popup = L.popup()
+    .setLatLng(e.latlng)
+    .setContent("Recherche…")
+    .openOn(map);
 
-    // ---------- 3.b Récupérer TOUS les segments de la rue autour du clic ----------
-    async function getStreetSegments(streetName, lat, lng) {
-      if (!streetName) return [];
+  setStatus("Recherche de la rue…");
 
-      const query = `
-        [out:json][timeout:25];
-        way(around:250, ${lat}, ${lng})["highway"]["name"="${streetName}"];
-        out geom;
-      `;
+  const name = await getStreetName(lat, lng);
 
-      const json = await overpassQuery(query);
-      return json.elements || [];
-    }
+  if (!name) {
+    popup.setContent("Aucune rue trouvée ici.");
+    return;
+  }
 
-    // ---------- 3.c Trouver toutes les lignes STM utilisant ces segments ----------
-    async function getStmLinesForSegments(segments) {
-      if (!segments.length) return [];
+  setStatus(`Rue trouvée : ${name} – chargement des segments…`);
 
-      // On construit une liste de rel(bw:ID) pour chaque segment
-      const relSelectors = segments
-        .map((seg) => `rel(bw:${seg.id})["route"="bus"]["network"~"STM"];`)
-        .join("\n");
+  const segments = await getStreetSegments(name, lat, lng);
+  drawSegments(segments);
 
-      const query = `
-        [out:json][timeout:25];
-        (
-          ${relSelectors}
-        );
-        out tags;
-      `;
+  setStatus(`Rue trouvée : ${name} – détection des lignes STM…`);
 
-      const json = await overpassQuery(query);
-      if (!json.elements) return [];
+  const lines = await getStmLines(segments);
 
-      const refs = new Set();
+  popup.setContent(
+    `<b>Rue :</b> ${name}<br>` +
+    `<b>Lignes STM :</b> ${lines.length ? lines.join(", ") : "aucune"}`
+  );
 
-      json.elements.forEach((rel) => {
-        if (!rel.tags) return;
-
-        // La plupart des lignes STM ont ref=24, 105, 138, etc.
-        const ref = rel.tags.ref || rel.tags.name
+  setStatus(`Rue ${name} – Lignes STM : ${lines.join(", ") || "Aucune"}`);
+});
