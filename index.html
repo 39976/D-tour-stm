@@ -1,190 +1,66 @@
-<!DOCTYPE html>
-<html lang="fr">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Détours STM – Démo rues</title>
+// =============== 3. TROUVER LE NOM + TOUS LES SEGMENTS DE LA RUE ===============
+async function getStreetSegments(lat, lng) {
 
-  <!-- Leaflet CSS -->
-  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.css">
+  // 1) D'abord trouver LE tronçon cliqué (nom de la rue)
+  const query1 = `
+    [out:json];
+    way(around:20, ${lat}, ${lng})["highway"]["name"];
+    out tags;
+  `;
+  const res1 = await fetch("https://overpass-api.de/api/interpreter", {
+    method: "POST",
+    headers: { "Content-Type": "text/plain" },
+    body: query1
+  });
+  const json1 = await res1.json();
 
-  <style>
-    html, body {
-      margin: 0;
-      padding: 0;
-      height: 100%;
-      overflow: hidden;
-      font-family: sans-serif;
-    }
+  if (!json1.elements || json1.elements.length === 0) {
+    return { name: "Rue inconnue", segments: [] };
+  }
 
-    #map {
-      position: absolute;
-      inset: 0;
-      z-index: 1;
-    }
+  const streetName = json1.elements[0].tags.name;
 
-    #panel {
-      position: absolute;
-      top: 10px;
-      left: 10px;
-      right: 10px;
-      background: white;
-      padding: 15px;
-      border-radius: 10px;
-      box-shadow: 0 4px 10px rgba(0,0,0,0.25);
-      z-index: 1000;
-    }
+  // 2) Maintenant récupérer TOUS les segments qui portent ce nom
+  const query2 = `
+    [out:json];
+    way(around:3000, ${lat}, ${lng})["name"="${streetName}"];
+    out geom;
+  `;
+  const res2 = await fetch("https://overpass-api.de/api/interpreter", {
+    method: "POST",
+    headers: { "Content-Type": "text/plain" },
+    body: query2
+  });
+  const json2 = await res2.json();
 
-    #clearBtn {
-      background:#d9534f;
-      color:white;
-      padding:10px 15px;
-      border:none;
-      border-radius:6px;
-      font-size:16px;
-      cursor:pointer;
-    }
+  const segments = json2.elements.map(way =>
+    way.geometry.map(pt => [pt.lat, pt.lon])
+  );
 
-    #clearBtn:hover {
-      background:#c64541;
-    }
-  </style>
-</head>
+  return { name: streetName, segments };
+}
 
-<body>
+// =============== 4. AFFICHER LES TRACÉS SUR TOUS LES SEGMENTS ===============
+function drawLinesForStreet(streetName, segments) {
+  clearLines();
 
-  <div id="panel">
-    <label>Ligne bus :</label>
-    <input id="ligne" type="text" placeholder="(facultatif)">
+  const filt = document.getElementById("ligne").value.trim();
+  const lignes = streetLines[streetName] || [];
+  const lignesFiltrees = filt ? lignes.filter(l => l === filt) : lignes;
 
-    <br><br>
+  if (lignesFiltrees.length === 0) return lignes;
 
-    <button id="clearBtn">Effacer tracés</button>
-
-    <p style="margin-top:10px;">
-      👉 Clique sur une rue.<br>
-      • Si c’est <b>Rue Sherbrooke Ouest</b> ou <b>Rue Sherbrooke Est</b>,<br>
-      &nbsp;&nbsp;→ j’affiche les lignes de bus connues qui passent par là.<br>
-      • Sinon : aucun tracé (démo).
-    </p>
-  </div>
-
-  <div id="map"></div>
-
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.js"></script>
-
-  <script>
-    // ================== 1. CARTE ==================
-    const map = L.map('map');
-    L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
-      maxZoom: 19
-    }).addTo(map);
-    map.setView([45.51, -73.58], 12); // Montréal
-
-    let displayedLines = [];
-    function clearLines() {
-      displayedLines.forEach(l => map.removeLayer(l));
-      displayedLines = [];
-    }
-    document.getElementById("clearBtn").onclick = clearLines;
-
-    // ================== 2. LIGNES PAR RUE (DEMO) ==================
-    const streetLines = {
-      "Rue Sherbrooke Ouest": ["24", "105", "138", "356"],
-      "Rue Sherbrooke Est":  ["24", "125", "185", "356"]
-    };
-
-    const lineColors = {
-      "24":  "blue",
-      "105": "red",
-      "138": "green",
-      "356": "purple",
-      "125": "orange",
-      "185": "brown"
-    };
-
-    // ================== 3. INFO RUE (nom + géométrie) VIA OVERPASS ==================
-    async function getStreetInfo(lat, lng) {
-      const query = `
-        [out:json];
-        way(around:20, ${lat}, ${lng})["highway"];
-        out tags geom;
-      `;
-      try {
-        const res = await fetch("https://overpass-api.de/api/interpreter", {
-          method: "POST",
-          headers: { "Content-Type": "text/plain" },
-          body: query
-        });
-        const json = await res.json();
-        if (json.elements && json.elements.length > 0) {
-          const way = json.elements[0];
-          const name = way.tags.name || "Rue inconnue";
-          const coords = (way.geometry || []).map(pt => [pt.lat, pt.lon]);
-          return { name, coords };
-        }
-      } catch (e) {
-        console.error(e);
-      }
-      return { name: "Rue inconnue", coords: [] };
-    }
-
-    // ================== 4. TRACER LIGNES SUR LA GÉOMÉTRIE DE LA RUE ==================
-    function drawLinesForStreet(streetName, streetCoords) {
-      clearLines();
-
-      const name = streetName.trim();
-      const filt = document.getElementById("ligne").value.trim();
-
-      const lignes = streetLines[name] || [];
-
-      const lignesFiltrees = filt
-        ? lignes.filter(n => n === filt)
-        : lignes;
-
-      if (lignesFiltrees.length === 0 || !streetCoords || streetCoords.length === 0) {
-        return lignes;
-      }
-
-      lignesFiltrees.forEach(num => {
-        const col = lineColors[num] || "#0072bc";
-        const poly = L.polyline(streetCoords, {
-          color: col,
-          weight: 6,
-          opacity: 0.9
-        }).addTo(map);
-        displayedLines.push(poly);
-      });
-
-      return lignesFiltrees;
-    }
-
-    // ================== 5. CLIC SUR LA CARTE ==================
-    map.on("click", async (e) => {
-      const lat = e.latlng.lat;
-      const lng = e.latlng.lng;
-
-      const loadingPopup = L.popup()
-        .setLatLng(e.latlng)
-        .setContent("Recherche de la rue…")
-        .openOn(map);
-
-      const info = await getStreetInfo(lat, lng);
-      const street = info.name;
-      const coords = info.coords;
-
-      const lignesActives = drawLinesForStreet(street, coords);
-
-      const txtLignes = (lignesActives && lignesActives.length > 0)
-        ? lignesActives.join(", ")
-        : "aucune (pour cette rue dans cette démo)";
-
-      loadingPopup.setContent(
-        `<b>Rue :</b> ${street}<br>` +
-        `<b>Lignes STM :</b> ${txtLignes}`
-      );
+  segments.forEach(segment => {
+    lignesFiltrees.forEach(num => {
+      const col = lineColors[num] || "black";
+      const poly = L.polyline(segment, {
+        color: col,
+        weight: 6,
+        opacity: 0.9
+      }).addTo(map);
+      displayedLines.push(poly);
     });
-  </script>
+  });
 
-</body>
-</html>
+  return lignesFiltrees;
+}
