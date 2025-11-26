@@ -1,110 +1,188 @@
-<script>
-  const map = L.map('map');
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Détours STM – Toutes les lignes</title>
 
-  L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
-    maxZoom: 19
-  }).addTo(map);
+  <link
+    rel="stylesheet"
+    href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.css"
+  >
 
-  map.setView([45.52, -73.55], 12);
+  <style>
+    html, body {
+      margin: 0;
+      padding: 0;
+      height: 100%;
+      overflow: hidden;
+      font-family: sans-serif;
+    }
 
-  // =========================
-  // LIGNES STM (simplifiées démo)
-  // =========================
+    #map {
+      position: absolute;
+      inset: 0;
+      z-index: 1;
+    }
 
-  const ligne24 = [
-    [45.49055, -73.58818],
-    [45.50369, -73.56845],
-    [45.51515, -73.55476],
-    [45.52420, -73.54320],
-    [45.53110, -73.53400],
-    [45.54355, -73.51700],
-    [45.54610, -73.51320]
-  ];
+    #panel {
+      position: absolute;
+      top: 10px;
+      left: 10px;
+      right: 10px;
+      background: white;
+      padding: 15px;
+      border-radius: 10px;
+      box-shadow: 0 4px 10px rgba(0,0,0,0.25);
+      z-index: 1000;
+    }
 
-  const ligne185 = [
-    [45.52420, -73.54320],
-    [45.52360, -73.52800],
-    [45.52310, -73.51400],
-    [45.52270, -73.50000],
-    [45.52230, -73.48600],
-    [45.52210, -73.47900]
-  ];
+    #clearBtn {
+      background:#d9534f;
+      color:white;
+      padding:10px 15px;
+      border:none;
+      border-radius:6px;
+      font-size:16px;
+      cursor:pointer;
+    }
 
-  const ligne14 = [
-    [45.5210, -73.5601],
-    [45.5170, -73.5630],
-    [45.5143, -73.5659]
-  ];
+    #clearBtn:hover {
+      background:#c64541;
+    }
+  </style>
+</head>
 
-  const lignesSTM = [
-    { num: "24",  color: "blue",  coords: ligne24 },
-    { num: "185", color: "red",   coords: ligne185 },
-    { num: "14",  color: "green", coords: ligne14 }
-  ];
+<body>
 
-  let displayedLines = [];
+  <div id="panel">
+    <label>Ligne bus :</label>
+    <input id="ligne" type="text" placeholder="(facultatif, filtre après)">
 
-  function clearLines() {
-    displayedLines.forEach(l => map.removeLayer(l));
-    displayedLines = [];
-  }
+    <br><br>
 
-  document.getElementById("clearBtn").onclick = clearLines;
+    <button id="clearBtn">Effacer tracés</button>
 
-  // =========================
-  // DÉTECTION : ligne la plus proche
-  // =========================
+    <p style="margin-top:10px;">
+      Clique sur la carte (sur ou près d’une rue) :<br>
+      → j’affiche toutes les <b>lignes STM</b> dont le tracé passe à proximité.<br>
+      (Données complètes GTFS STM à partir de <code>stm_lignes.json</code>.)
+    </p>
+  </div>
 
-  function distance(a, b) {
-    return Math.sqrt(
-      Math.pow(a[0] - b[0], 2) +
-      Math.pow(a[1] - b[1], 2)
-    );
-  }
+  <div id="map"></div>
 
-  function lignesProchesDuClic(lat, lng, maxDist = 0.003) {
-    const result = [];
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.js"></script>
 
-    lignesSTM.forEach(ligne => {
-      for (let p of ligne.coords) {
-        if (distance([lat, lng], p) < maxDist) {
-          result.push(ligne);
-          break;
+  <script>
+    const map = L.map('map');
+    L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      maxZoom: 19
+    }).addTo(map);
+    map.setView([45.52, -73.57], 12);
+
+    // Toutes les routes STM (chargées depuis stm_lignes.json)
+    let routes = [];
+    let displayedLines = [];
+
+    function clearLines() {
+      displayedLines.forEach(l => map.removeLayer(l));
+      displayedLines = [];
+    }
+
+    document.getElementById("clearBtn").onclick = clearLines;
+
+    // distance en mètres
+    function distanceMeters(lat1, lon1, lat2, lon2) {
+      const R = 6371000;
+      const dLat = (lat2 - lat1) * Math.PI / 180;
+      const dLon = (lon2 - lon1) * Math.PI / 180;
+
+      const a =
+        Math.sin(dLat / 2) ** 2 +
+        Math.cos(lat1 * Math.PI / 180) *
+        Math.cos(lat2 * Math.PI / 180) *
+        Math.sin(dLon / 2) ** 2;
+
+      return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+    }
+
+    // Retourne les routes proches d’un point
+    function routesProches(lat, lng, maxDistanceMeters = 80) {
+      const filt = document.getElementById("ligne").value.trim();
+      const result = [];
+
+      routes.forEach(route => {
+        // si champ "Ligne bus" rempli, on filtre par numéro
+        if (filt && route.short_name && route.short_name !== filt) return;
+
+        let proche = false;
+
+        for (const shape of route.shapes) {
+          for (const coord of shape) {
+            const d = distanceMeters(lat, lng, coord[0], coord[1]);
+            if (d <= maxDistanceMeters) {
+              proche = true;
+              break;
+            }
+          }
+          if (proche) break;
         }
-      }
+
+        if (proche) {
+          result.push(route);
+        }
+      });
+
+      return result;
+    }
+
+    // Clic sur la carte
+    map.on("click", (e) => {
+      const lat = e.latlng.lat;
+      const lng = e.latlng.lng;
+
+      clearLines();
+
+      const trouvées = routesProches(lat, lng);
+
+      trouvées.forEach(route => {
+        const col = route.color && route.color !== "#000000"
+          ? route.color
+          : "#0072bc";
+
+        route.shapes.forEach(shapeCoords => {
+          const poly = L.polyline(shapeCoords, {
+            color: col,
+            weight: 3,
+            opacity: 0.8
+          }).addTo(map);
+          displayedLines.push(poly);
+        });
+      });
+
+      const noms = trouvées.length > 0
+        ? trouvées.map(r => r.short_name || r.route_id).join(", ")
+        : "aucune";
+
+      L.popup()
+        .setLatLng(e.latlng)
+        .setContent("<b>Lignes STM proches :</b> " + noms)
+        .openOn(map);
     });
 
-    return result;
-  }
+    // Charger stm_lignes.json
+    fetch("stm_lignes.json")
+      .then(res => res.json())
+      .then(data => {
+        routes = data;
+        console.log("Routes STM chargées :", routes.length);
+      })
+      .catch(err => {
+        console.error("Erreur de chargement stm_lignes.json :", err);
+        alert("Impossible de charger stm_lignes.json. Assure-toi qu'il est à la racine du repo.");
+      });
+  </script>
 
-  // =========================
-  // CLIC SUR CARTE
-  // =========================
-
-  map.on("click", (e) => {
-    const lat = e.latlng.lat;
-    const lng = e.latlng.lng;
-
-    clearLines();
-
-    const lignes = lignesProchesDuClic(lat, lng);
-
-    lignes.forEach(ligne => {
-      const poly = L.polyline(ligne.coords, {
-        color: ligne.color,
-        weight: 5
-      }).addTo(map);
-      displayedLines.push(poly);
-    });
-
-    const texte = lignes.length > 0
-      ? lignes.map(l => l.num).join(", ")
-      : "aucune ligne";
-
-    L.popup()
-      .setLatLng(e.latlng)
-      .setContent(`<b>Lignes STM proches :</b> ${texte}`)
-      .openOn(map);
-  });
-
-</script>
+</body>
+</html>
