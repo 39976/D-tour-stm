@@ -2,9 +2,8 @@
 <html lang="fr">
 <head>
   <meta charset="UTF-8">
-  <title>Détours STM</title>
+  <title>Test Carte</title>
 
-  <!-- Leaflet CSS -->
   <link rel="stylesheet"
         href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
 
@@ -15,127 +14,36 @@
       font-family: sans-serif;
     }
 
-    /* Zone interface */
     #panel {
       padding: 15px;
+      background: white;
     }
 
-    /* Carte en plein écran sous l’interface */
+    /* HAUTEUR FIXE POUR TESTER */
     #map {
       width: 100%;
-      height: calc(100vh - 150px); /* adapte selon la hauteur du panel */
+      height: 500px;
       background: #eee;
-    }
-
-    /* Style des boutons */
-    button {
-      padding: 10px 15px;
-      border: none;
-      border-radius: 6px;
-      font-size: 16px;
-      cursor: pointer;
-      font-weight: bold;
-    }
-
-    #clearBtn {
-      background: #d9534f;
-      color: white;
-    }
-
-    #clearBtn:hover {
-      background: #c9302c;
     }
   </style>
 </head>
 
 <body>
 
-  <!-- TON INTERFACE ORIGINALE -->
   <div id="panel">
-    <label>Ligne bus :</label>
-    <input id="ligne" type="text" value="186">
-
-    <br><br>
-
-    <button id="clearBtn">Effacer détour</button>
-
-    <p>
-      1er clic : <b>début du détour</b> —  
-      2e clic : <b>fin du détour</b> → calcul automatique
-    </p>
+    <p>Si tu vois la carte en bas → le problème était la hauteur.</p>
   </div>
 
-  <!-- ICI LA CARTE APPARAÎT -->
   <div id="map"></div>
 
-  <!-- Leaflet JS -->
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 
   <script>
-    // Initialisation de la carte sur Montréal
     const map = L.map('map').setView([45.508, -73.587], 12);
 
-    // Fond de carte OpenStreetMap
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-      maxZoom: 19,
-      attribution: '© OpenStreetMap'
+      maxZoom: 19
     }).addTo(map);
-
-    // Exemple arrêt
-    const arret = L.marker([45.5151, -73.5619]).addTo(map);
-    arret.bindPopup("Arrêt STM — Berri-UQAM");
-
-    // Exemple ligne
-    const ligneExemple = [
-      [45.5295, -73.6100],
-      [45.5225, -73.5980],
-      [45.5180, -73.5820],
-      [45.5151, -73.5619]
-    ];
-
-    L.polyline(ligneExemple, {
-      color: "#0072bc",
-      weight: 5,
-      opacity: 0.9
-    }).addTo(map);
-
-    // Clics détour (début & fin)
-    let start = null;
-    let end = null;
-    let markers = [];
-    let detourLine = null;
-
-    map.on("click", e => {
-      if (!start) {
-        start = e.latlng;
-        let m1 = L.marker(start).addTo(map);
-        markers.push(m1);
-      } else if (!end) {
-        end = e.latlng;
-        let m2 = L.marker(end).addTo(map);
-        markers.push(m2);
-
-        // Tracé détour entre début et fin
-        detourLine = L.polyline([start, end], {
-          color: "red",
-          weight: 4
-        }).addTo(map);
-      }
-    });
-
-    // Effacer détour
-    document.getElementById("clearBtn").onclick = () => {
-      start = null;
-      end = null;
-
-      markers.forEach(m => map.removeLayer(m));
-      markers = [];
-
-      if (detourLine) {
-        map.removeLayer(detourLine);
-        detourLine = null;
-      }
-    };
   </script>
 
 </body>
