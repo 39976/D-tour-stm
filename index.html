@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Détours STM – Démo</title>
+  <title>Détours STM – Démo rues</title>
 
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
@@ -29,22 +29,22 @@
 <body>
 
 <div id="panel">
-  Clique une rue pour afficher les lignes STM.
+  👉 Clique une rue : j’affiche le nom + les lignes STM.
 </div>
 
 <div id="map"></div>
 
 <script>
 const map = L.map('map').setView([45.508, -73.587], 13);
-L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
+L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png").addTo(map);
 
-// --- Lignes par rue (démonstration) ---
+// --- Lignes STM par rue (démonstration) ---
 const streetLines = {
   "Rue Sherbrooke Ouest": ["24", "105", "138", "356"],
-  "Rue Sherbrooke Est" : ["24", "125", "185", "356"]
+  "Rue Sherbrooke Est": ["24", "125", "185", "356"]
 };
 
-// --- Couleurs des lignes ---
+// --- Couleurs ---
 const lineColors = {
   "24": "blue",
   "105": "red",
@@ -56,13 +56,13 @@ const lineColors = {
 
 let activeLines = [];
 
-// Effacer les tracés
+// Effacer les tracés existants
 function clearLines() {
   activeLines.forEach(l => map.removeLayer(l));
   activeLines = [];
 }
 
-// Obtenir le nom de la rue via Overpass
+// Récupérer nom de rue via Overpass
 async function getStreetName(lat, lng) {
   const query = `
     [out:json];
@@ -81,20 +81,18 @@ async function getStreetName(lat, lng) {
   return json.elements[0].tags.name || "Rue inconnue";
 }
 
-// Tracer les lignes STM
-function drawLines(names, lat, lng) {
+// Tracer les lignes STM (simple)
+function drawLines(lines, lat, lng) {
   clearLines();
-  names.forEach(num => {
-    const col = lineColors[num] || "black";
+  lines.forEach(num => {
     const poly = L.polyline([
-      [lat - 0.001, lng - 0.005],
-      [lat,         lng],
-      [lat + 0.001, lng + 0.005]
+      [lat - 0.001, lng - 0.004],
+      [lat, lng],
+      [lat + 0.001, lng + 0.004]
     ], {
-      color: col,
+      color: lineColors[num] || "black",
       weight: 6
     }).addTo(map);
-
     activeLines.push(poly);
   });
 }
@@ -108,13 +106,13 @@ map.on("click", async e => {
 
   const street = await getStreetName(lat, lng);
 
-  let lignes = streetLines[street] || [];
+  const lines = streetLines[street] || [];
 
-  drawLines(lignes, lat, lng);
+  drawLines(lines, lat, lng);
 
   popup.setContent(`
     <b>Rue :</b> ${street}<br>
-    <b>Lignes STM :</b> ${lignes.length ? lignes.join(", ") : "aucune"}
+    <b>Lignes STM :</b> ${lines.length ? lines.join(", ") : "aucune"}
   `);
 });
 </script>
