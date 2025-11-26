@@ -1,104 +1,140 @@
 <!DOCTYPE html>
 <html lang="fr">
-
 <head>
-  <meta charset="UTF-8" />
+  <meta charset="UTF-8">
   <title>Détours STM</title>
 
   <!-- Leaflet CSS -->
   <link rel="stylesheet"
-    href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
-    crossorigin="" />
+        href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
 
   <style>
-    html, body {
+    body {
       margin: 0;
       padding: 0;
-      height: 100%;
+      font-family: sans-serif;
     }
 
+    /* Zone interface */
+    #panel {
+      padding: 15px;
+    }
+
+    /* Carte en plein écran sous l’interface */
     #map {
       width: 100%;
-      height: 100%;
+      height: calc(100vh - 150px); /* adapte selon la hauteur du panel */
+      background: #eee;
     }
 
-    .floating-buttons {
-      position: absolute;
-      top: 10px;
-      right: 10px;
-      display: flex;
-      flex-direction: column;
-      gap: 10px;
-      z-index: 1000;
-    }
-
-    .floating-buttons button {
-      padding: 8px 12px;
-      background: #0072bc;
-      color: white;
+    /* Style des boutons */
+    button {
+      padding: 10px 15px;
       border: none;
       border-radius: 6px;
+      font-size: 16px;
       cursor: pointer;
-      font-size: 15px;
       font-weight: bold;
     }
 
-    .floating-buttons button:hover {
-      background: #005a95;
+    #clearBtn {
+      background: #d9534f;
+      color: white;
+    }
+
+    #clearBtn:hover {
+      background: #c9302c;
     }
   </style>
 </head>
 
 <body>
 
-  <!-- CARTE -->
-  <div id="map"></div>
+  <!-- TON INTERFACE ORIGINALE -->
+  <div id="panel">
+    <label>Ligne bus :</label>
+    <input id="ligne" type="text" value="186">
 
-  <!-- BOUTONS AVANT / APRÈS -->
-  <div class="floating-buttons">
-    <button id="avant">Avant</button>
-    <button id="apres">Après</button>
+    <br><br>
+
+    <button id="clearBtn">Effacer détour</button>
+
+    <p>
+      1er clic : <b>début du détour</b> —  
+      2e clic : <b>fin du détour</b> → calcul automatique
+    </p>
   </div>
 
+  <!-- ICI LA CARTE APPARAÎT -->
+  <div id="map"></div>
+
   <!-- Leaflet JS -->
-  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
-    crossorigin=""></script>
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 
   <script>
-    // 1. Initialisation de la carte sur Montréal
+    // Initialisation de la carte sur Montréal
     const map = L.map('map').setView([45.508, -73.587], 12);
 
-    // 2. Fond de carte OpenStreetMap
+    // Fond de carte OpenStreetMap
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
       maxZoom: 19,
       attribution: '© OpenStreetMap'
     }).addTo(map);
 
-    // 3. Exemple : un arrêt (Berri-UQAM)
+    // Exemple arrêt
     const arret = L.marker([45.5151, -73.5619]).addTo(map);
-    arret.bindPopup("Arrêt STM – Berri-UQAM");
+    arret.bindPopup("Arrêt STM — Berri-UQAM");
 
-    // 4. Exemple : un petit tracé de ligne de bus
-    const ligne = [
-      [45.5295, -73.6100], 
+    // Exemple ligne
+    const ligneExemple = [
+      [45.5295, -73.6100],
       [45.5225, -73.5980],
       [45.5180, -73.5820],
       [45.5151, -73.5619]
     ];
 
-    L.polyline(ligne, {
+    L.polyline(ligneExemple, {
       color: "#0072bc",
       weight: 5,
       opacity: 0.9
     }).addTo(map);
 
-    // 5. Boutons AVANT / APRÈS – tu mettras ta logique plus tard
-    document.getElementById("avant").onclick = () => {
-      alert("Vue AVANT : à remplacer par ta vraie logique plus tard.");
-    };
+    // Clics détour (début & fin)
+    let start = null;
+    let end = null;
+    let markers = [];
+    let detourLine = null;
 
-    document.getElementById("apres").onclick = () => {
-      alert("Vue APRÈS : à remplacer par ta vraie logique.");
+    map.on("click", e => {
+      if (!start) {
+        start = e.latlng;
+        let m1 = L.marker(start).addTo(map);
+        markers.push(m1);
+      } else if (!end) {
+        end = e.latlng;
+        let m2 = L.marker(end).addTo(map);
+        markers.push(m2);
+
+        // Tracé détour entre début et fin
+        detourLine = L.polyline([start, end], {
+          color: "red",
+          weight: 4
+        }).addTo(map);
+      }
+    });
+
+    // Effacer détour
+    document.getElementById("clearBtn").onclick = () => {
+      start = null;
+      end = null;
+
+      markers.forEach(m => map.removeLayer(m));
+      markers = [];
+
+      if (detourLine) {
+        map.removeLayer(detourLine);
+        detourLine = null;
+      }
     };
   </script>
 
