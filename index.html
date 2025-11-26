@@ -257,3 +257,226 @@
         throw new Error("Erreur Overpass " + resp.status);
       }
       const json = await resp.json();
+      return json.elements || [];
+    }
+
+    // 1) Trouver le tronçon de rue exact sous le clic
+    async function findClickedStreet(lat, lng) {
+      // Si zoom trop loin, éviter un énorme around:
+      const zoom = map.getZoom();
+      if (zoom < 11) {
+        throw new Error(
+          "Zoom trop éloigné. Rapproche-toi un peu avant de cliquer 😉."
+        );
+      }
+
+      const aroundMeters = 60; // rayon de recherche
+      const query = `
+        [out:json][timeout:25];
+        way(around:${aroundMeters},${lat},${lng})
+          ["highway"]
+          ["name"];
+        out geom;
+      `;
+
+      const ways = await overpassQuery(query);
+      if (!ways.length) return null;
+
+      // Choisir le way dont un point est le plus proche du clic
+      const clickPoint = { lat, lng };
+      let best = null;
+      let bestDist = Infinity;
+
+      ways.forEach((w) => {
+        if (!w.geometry || !w.geometry.length) return;
+        for (const g of w.geometry) {
+          const d = distanceMeters(clickPoint, { lat: g.lat, lng: g.lon });
+          if (d < bestDist) {
+            bestDist = d;
+            best = w;
+          }
+        }
+      });
+
+      // On limite à ~40 m pour éviter de prendre une rue voisine
+      if (!best || bestDist > 40) return null;
+
+      return best; // contient id, tags.name, geometry[]
+    }
+
+    // 2) Trouver les relations route=bus qui utilisent ce way
+    async function findBusLinesForWay(wayId) {
+      const query = `
+        [out:json][timeout:25];
+        rel(bw:${wayId})["route"="bus"];
+        out tags;
+      `;
+      const rels = await overpassQuery(query);
+
+      const lineSet = new Set();
+
+      for (const r of rels) {
+        if (!r.tags) continue;
+        let ref = r.tags.ref || r.tags.name || "";
+        if (!ref) continue;
+
+        // Certains refs peuvent être "24;356" ou "24 / 356"
+        const parts = ref.split(/[;,/]/);
+        parts.forEach((p) => {
+          const trimmed = p.trim();
+          if (!trimmed) return;
+          // Ne garder que les refs qui commencent par un nombre
+          const m = trimmed.match(/^(\d+)/);
+          if (m) {
+            lineSet.add(m[1]);
+          }
+        });
+      }
+
+      const lines = Array.from(lineSet);
+      // Tri numérique
+      lines.sort((a, b) => Number(a) - Number(b));
+
+      return lines;
+    }
+
+    // ========================
+    //  Tracé multi-lignes
+    // ========================
+
+    // Palette simple, réutilisée si plus de couleurs que prévu
+    const COLORS = [
+      "#0057e7",
+      "#d62d20",
+      "#008744",
+      "#ffa700",
+      "#7b1fa2",
+      "#03a9f4",
+      "#ff4081",
+      "#795548",
+      "#009688",
+      "#cddc39",
+    ];
+
+    function drawLinesOnStreet(baseGeometry, lineRefs) {
+      const colorMap = {};
+      const n = lineRefs.length;
+      if (!n) return colorMap;
+
+      // baseGeometry: [{lat, lon}, ...]
+      const baseLatLngs = baseGeometry.map((p) => [p.lat, p.lon]);
+
+      // On décale légèrement chaque ligne en latitude
+      const offsetDeg = 0.00004; // ~4-5 m
+      const centerIndex = (n - 1) / 2;
+
+      lineRefs.forEach((ref, index) => {
+        const color = COLORS[index % COLORS.length];
+        colorMap[ref] = color;
+
+        const delta = (index - centerIndex) * offsetDeg;
+        const shifted = baseLatLngs.map(([lat, lon]) => [lat + delta, lon]);
+
+        const poly = L.polyline(shifted, {
+          color,
+          weight: 4,
+          opacity: 0.9,
+        }).addTo(map);
+
+        currentPolylines.push(poly);
+      });
+
+      // Ajuster légèrement la vue sur le tronçon cliqué
+      if (baseLatLngs.length >= 2) {
+        const bounds = L.latLngBounds(baseLatLngs);
+        map.fitBounds(bounds.pad(0.2));
+      }
+
+      return colorMap;
+    }
+
+    // ========================
+    //  Gestion du clic carte
+    // ========================
+
+    async function handleMapClick(e) {
+      const { lat, lng } = e.latlng;
+      clearDynamicLayers();
+      showStatus("Recherche de la rue…");
+
+      // Petit marqueur transparent pour repère (facultatif)
+      currentClickMarker = L.circleMarker(e.latlng, {
+        radius: 4,
+        color: "#000",
+        fillColor: "#fff",
+        fillOpacity: 1,
+        opacity: 0.8,
+      }).addTo(map);
+
+      try {
+        const way = await findClickedStreet(lat, lng);
+        if (!way) {
+          showStatus("");
+          const msg =
+            "<b>Rue :</b> Inconnue<br/><b>Lignes STM :</b> Aucune donnée";
+          currentPopup = L.popup()
+            .setLatLng(e.latlng)
+            .setContent(msg)
+            .openOn(map);
+          return;
+        }
+
+        const streetName = way.tags.name || "Rue sans nom";
+        debugLog("Rue trouvée:", streetName, "id:", way.id);
+
+        showStatus("Recherche des lignes STM…");
+
+        const lines = await findBusLinesForWay(way.id);
+
+        showStatus("");
+
+        if (!lines.length) {
+          const msg =
+            "<b>Rue :</b> " +
+            streetName +
+            "<br/><b>Lignes STM :</b> Aucune donnée";
+          currentPopup = L.popup()
+            .setLatLng(e.latlng)
+            .setContent(msg)
+            .openOn(map);
+          hideLegend();
+          return;
+        }
+
+        // Tracer les lignes sur le tronçon + légende
+        const colorMap = drawLinesOnStreet(way.geometry, lines);
+
+        const msg =
+          "<b>Rue :</b> " +
+          streetName +
+          "<br/><b>Lignes STM :</b> " +
+          lines.join(", ");
+        currentPopup = L.popup()
+          .setLatLng(e.latlng)
+          .setContent(msg)
+          .openOn(map);
+
+        currentPopup.openOn(map);
+        showLegend(lines, colorMap);
+      } catch (err) {
+        console.error(err);
+        showStatus("");
+        const msg =
+          "<b>Rue :</b> Erreur<br/><b>Lignes STM :</b> Aucune donnée";
+        currentPopup = L.popup()
+          .setLatLng(e.latlng)
+          .setContent(msg)
+          .openOn(map);
+        hideLegend();
+      }
+    }
+
+    map.on("click", handleMapClick);
+  </script>
+</body>
+</html>
