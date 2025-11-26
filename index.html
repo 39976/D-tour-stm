@@ -1,66 +1,173 @@
-// =============== 3. TROUVER LE NOM + TOUS LES SEGMENTS DE LA RUE ===============
-async function getStreetSegments(lat, lng) {
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Détours STM – Démo rues</title>
 
-  // 1) D'abord trouver LE tronçon cliqué (nom de la rue)
-  const query1 = `
-    [out:json];
-    way(around:20, ${lat}, ${lng})["highway"]["name"];
-    out tags;
-  `;
-  const res1 = await fetch("https://overpass-api.de/api/interpreter", {
-    method: "POST",
-    headers: { "Content-Type": "text/plain" },
-    body: query1
-  });
-  const json1 = await res1.json();
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.css">
 
-  if (!json1.elements || json1.elements.length === 0) {
-    return { name: "Rue inconnue", segments: [] };
-  }
+  <style>
+    html, body {
+      margin: 0;
+      padding: 0;
+      height: 100%;
+      overflow: hidden;
+      font-family: sans-serif;
+    }
 
-  const streetName = json1.elements[0].tags.name;
+    #map {
+      position: absolute;
+      inset: 0;
+      z-index: 1;
+    }
 
-  // 2) Maintenant récupérer TOUS les segments qui portent ce nom
-  const query2 = `
-    [out:json];
-    way(around:3000, ${lat}, ${lng})["name"="${streetName}"];
-    out geom;
-  `;
-  const res2 = await fetch("https://overpass-api.de/api/interpreter", {
-    method: "POST",
-    headers: { "Content-Type": "text/plain" },
-    body: query2
-  });
-  const json2 = await res2.json();
+    #panel {
+      position: absolute;
+      top: 10px;
+      left: 10px;
+      right: 10px;
+      background: white;
+      padding: 15px;
+      border-radius: 10px;
+      box-shadow: 0 4px 10px rgba(0,0,0,0.25);
+      z-index: 1000;
+    }
 
-  const segments = json2.elements.map(way =>
-    way.geometry.map(pt => [pt.lat, pt.lon])
-  );
+    #clearBtn {
+      background:#d9534f;
+      color:white;
+      padding:10px 15px;
+      border:none;
+      border-radius:6px;
+      font-size:16px;
+      cursor:pointer;
+    }
+  </style>
+</head>
 
-  return { name: streetName, segments };
-}
+<body>
 
-// =============== 4. AFFICHER LES TRACÉS SUR TOUS LES SEGMENTS ===============
-function drawLinesForStreet(streetName, segments) {
-  clearLines();
+  <div id="panel">
+    <label>Ligne bus :</label>
+    <input id="ligne" type="text" placeholder="(facultatif)">
+    <br><br>
 
-  const filt = document.getElementById("ligne").value.trim();
-  const lignes = streetLines[streetName] || [];
-  const lignesFiltrees = filt ? lignes.filter(l => l === filt) : lignes;
+    <button id="clearBtn">Effacer tracés</button>
 
-  if (lignesFiltrees.length === 0) return lignes;
+    <p style="margin-top:10px;">
+      👉 Clique sur une rue.<br>
+      Si c’est Rue Sherbrooke Ouest ou Rue Sherbrooke Est,<br>
+      j’affiche les lignes de bus connues.
+    </p>
+  </div>
 
-  segments.forEach(segment => {
-    lignesFiltrees.forEach(num => {
-      const col = lineColors[num] || "black";
-      const poly = L.polyline(segment, {
-        color: col,
-        weight: 6,
-        opacity: 0.9
-      }).addTo(map);
-      displayedLines.push(poly);
-    });
-  });
+  <div id="map"></div>
 
-  return lignesFiltrees;
-}
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.js"></script>
+
+  <script>
+
+    // ================== INIT CARTE ==================
+    const map = L.map('map');
+    L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      maxZoom: 19
+    }).addTo(map);
+    map.setView([45.51, -73.58], 12);
+
+    let displayedLines = [];
+    function clearLines() {
+      displayedLines.forEach(l => map.removeLayer(l));
+      displayedLines = [];
+    }
+    document.getElementById("clearBtn").onclick = clearLines;
+
+    // ================== LIGNES STM (DEMO) ==================
+    const streetLines = {
+      "Rue Sherbrooke Ouest": ["24", "105", "138", "356"],
+      "Rue Sherbrooke Est":  ["24", "125", "185", "356"]
+    };
+
+    const lineColors = {
+      "24": "blue",
+      "105": "red",
+      "138": "green",
+      "356": "purple",
+      "125": "orange",
+      "185": "brown"
+    };
+
+    // ============ 1. TROUVER NOM + TOUS SEGMENTS DE LA RUE ============
+    async function getStreetSegments(lat, lng) {
+
+      // Trouver tronçon du clic
+      const query1 = `
+        [out:json];
+        way(around:20, ${lat}, ${lng})["highway"]["name"];
+        out tags;
+      `;
+      const res1 = await fetch("https://overpass-api.de/api/interpreter", {
+        method: "POST",
+        headers: { "Content-Type": "text/plain" },
+        body: query1
+      });
+      const json1 = await res1.json();
+
+      if (!json1.elements || json1.elements.length === 0)
+        return { name: "Rue inconnue", segments: [] };
+
+      const streetName = json1.elements[0].tags.name;
+
+      // Télécharger toute la rue
+      const query2 = `
+        [out:json];
+        way(around:3000, ${lat}, ${lng})["name"="${streetName}"];
+        out geom;
+      `;
+      const res2 = await fetch("https://overpass-api.de/api/interpreter", {
+        method: "POST",
+        headers: { "Content-Type": "text/plain" },
+        body: query2
+      });
+      const json2 = await res2.json();
+
+      const segments = json2.elements.map(way =>
+        way.geometry.map(pt => [pt.lat, pt.lon])
+      );
+
+      return { name: streetName, segments };
+    }
+
+    // ============ 2. AFFICHER TRACÉS LIGNES STM ============
+    function drawLinesForStreet(streetName, segments) {
+      clearLines();
+
+      const filt = document.getElementById("ligne").value.trim();
+      const lignes = streetLines[streetName] || [];
+      const lignesFiltrees = filt ? lignes.filter(l => l === filt) : lignes;
+
+      if (lignesFiltrees.length === 0) return lignes;
+
+      segments.forEach(segment => {
+        lignesFiltrees.forEach(num => {
+          const col = lineColors[num] || "black";
+          const poly = L.polyline(segment, {
+            color: col,
+            weight: 6,
+            opacity: 0.9
+          }).addTo(map);
+          displayedLines.push(poly);
+        });
+      });
+
+      return lignesFiltrees;
+    }
+
+    // ============ 3. CLIC SUR LA CARTE ============
+    map.on("click", async (e) => {
+
+      const lat = e.latlng.lat;
+      const lng = e.latlng.lng;
+
+      const popup = L.popup()
+        .
