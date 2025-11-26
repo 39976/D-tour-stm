@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <title>Détours STM</title>
 
-  <!-- Leaflet CSS (version mobile safe) -->
+  <!-- Leaflet CSS -->
   <link rel="stylesheet"
         href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.css">
 
@@ -13,31 +13,42 @@
       margin: 0;
       padding: 0;
       font-family: sans-serif;
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
     }
 
+    /* Ton panneau en haut */
     #panel {
       padding: 15px;
       background: white;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+      z-index: 1000;
     }
 
-    /* hauteur FIXE pour tester (obligatoire) */
+    /* Carte qui prend toute la hauteur restante */
     #map {
+      flex: 1;              /* 🔥 remplit tout l’espace disponible */
       width: 100%;
-      height: 500px;
       background: #ccc;
     }
   </style>
+
 </head>
 
 <body>
 
+  <!-- Ton interface -->
   <div id="panel">
     <label>Ligne bus :</label>
     <input id="ligne" type="text" value="186">
 
     <br><br>
 
-    <button id="clearBtn" style="background:#d9534f;color:white;padding:10px 15px;border:none;border-radius:6px;font-size:16px;">Effacer détour</button>
+    <button id="clearBtn"
+      style="background:#d9534f;color:white;padding:10px 15px;border:none;border-radius:6px;font-size:16px;">
+      Effacer détour
+    </button>
 
     <p>
       1er clic : <b>début du détour</b> —  
@@ -45,16 +56,17 @@
     </p>
   </div>
 
+  <!-- La carte -->
   <div id="map"></div>
 
-  <!-- Leaflet JS (version mobile safe, pas de integrity, pas de crossorigin) -->
+  <!-- Leaflet JS -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.js"></script>
 
   <script>
-    console.log("Feuille chargée : test");
-
+    // Initialisation de la carte
     const map = L.map('map').setView([45.508, -73.587], 12);
 
+    // Fond OSM
     L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
       maxZoom: 19
     }).addTo(map);
