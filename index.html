@@ -1,91 +1,258 @@
-<script>
-  const map = L.map('map').setView([45.515, -73.56], 12);
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Détours STM</title>
 
-  L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
-    maxZoom: 19
-  }).addTo(map);
+  <!-- Leaflet CSS -->
+  <link
+    rel="stylesheet"
+    href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.css"
+  >
 
+  <style>
+    html, body {
+      margin: 0;
+      padding: 0;
+      height: 100%;
+      overflow: hidden;
+      font-family: sans-serif;
+    }
 
-  // --- LIGNES ---
+    /* Carte plein écran */
+    #map {
+      position: absolute;
+      inset: 0;
+      z-index: 1;
+    }
 
-  const ligne24 = [
-    [45.50850, -73.57500],
-    [45.50910, -73.55850],
-    [45.51000, -73.54500],
-    [45.51120, -73.53050],
-    [45.51250, -73.51600],
-    [45.51290, -73.50650],
-    [45.51330, -73.50000],
-    [45.51360, -73.49200],
-    [45.51400, -73.48600]
-  ];
+    /* Panneau flottant */
+    #panel {
+      position: absolute;
+      top: 10px;
+      left: 10px;
+      right: 10px;
+      background: white;
+      padding: 15px;
+      border-radius: 10px;
+      box-shadow: 0 4px 10px rgba(0,0,0,0.25);
+      z-index: 1000;
+    }
 
-  const ligne185 = [
-    [45.52150, -73.56300],
-    [45.52140, -73.55000],
-    [45.52120, -73.53300],
-    [45.52100, -73.52000],
-    [45.52080, -73.51000],
-    [45.52070, -73.50000],
-    [45.52060, -73.49000],
-    [45.52040, -73.48000],
-    [45.52030, -73.47000],
-    [45.52020, -73.46000]
-  ];
+    #clearBtn {
+      background:#d9534f;
+      color:white;
+      padding:10px 15px;
+      border:none;
+      border-radius:6px;
+      font-size:16px;
+      cursor:pointer;
+    }
 
-  const ligne14 = [
-    [45.52440, -73.56850],
-    [45.52100, -73.56050],
-    [45.51800, -73.55800],
-    [45.51490, -73.55600],
-    [45.51230, -73.55300]
-  ];
+    #clearBtn:hover {
+      background:#c64541;
+    }
+  </style>
+</head>
 
-  L.polyline(ligne24,  { color: "blue",  weight: 4 }).addTo(map);
-  L.polyline(ligne185, { color: "red",   weight: 4 }).addTo(map);
-  L.polyline(ligne14,  { color: "green", weight: 4 }).addTo(map);
+<body>
 
+  <!-- Panneau UI (inutile pour la logique mais je le garde) -->
+  <div id="panel">
+    <label>Ligne bus :</label>
+    <input id="ligne" type="text" value="">
 
-  // --- ARRÊTS ---
+    <br><br>
 
-  const arrets24 = [
-    { name: "Sherbrooke / Aylmer",       coord: [45.5104, -73.5687] },
-    { name: "Sherbrooke / Saint-Urbain", coord: [45.5110, -73.5660] },
-    { name: "Sherbrooke / Saint-Laurent", coord: [45.5113, -73.5621] },
-    { name: "Sherbrooke / Saint-Dominique", coord: [45.5118, -73.5580] },
-    { name: "Sherbrooke / de Bullion",   coord: [45.5122, -73.5547] }
-  ];
+    <button id="clearBtn">Effacer tracés</button>
 
-  const arrets185 = [
-    { name: "Sherbrooke / Papineau", coord: [45.5242, -73.5590] },
-    { name: "Sherbrooke / Cartier",  coord: [45.5241, -73.5550] },
-    { name: "Sherbrooke / Frontenac", coord: [45.5238, -73.5511] },
-    { name: "Sherbrooke / d'Iberville", coord: [45.5235, -73.5460] },
-    { name: "Sherbrooke / Dézéry",      coord: [45.5232, -73.5410] }
-  ];
+    <p style="margin-top:10px;">
+      Clique sur la carte (sur une rue) :<br>
+      → je trouve le <b>nom de la rue</b><br>
+      → j’affiche les <b>lignes de bus</b> qui passent près de là (24, 185, 14 dans cette démo).
+    </p>
+  </div>
 
-  const arrets14 = [
-    { name: "Amherst / Sherbrooke", coord: [45.5210, -73.5601] },
-    { name: "Sherbrooke / Saint-André", coord: [45.5187, -73.5614] },
-    { name: "Sherbrooke / Berri", coord: [45.5170, -73.5630] },
-    { name: "Sherbrooke / Sanguinet", coord: [45.5157, -73.5644] },
-    { name: "Sherbrooke / Saint-Denis", coord: [45.5143, -73.5659] }
-  ];
+  <!-- Carte -->
+  <div id="map"></div>
 
-  function afficherArrets(arrets, couleur) {
-    arrets.forEach(a => {
-      L.circleMarker(a.coord, {
-        radius: 6,
-        color: couleur,
-        fillColor: couleur,
-        fillOpacity: 0.9
-      })
-      .bindPopup(a.name)
-      .addTo(map);
+  <!-- Leaflet JS -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.js"></script>
+
+  <script>
+    // =========================
+    // 1. Initialisation carte
+    // =========================
+    const map = L.map('map');
+
+    L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      maxZoom: 19
+    }).addTo(map);
+
+    // On commence centré sur Montréal
+    map.setView([45.52, -73.55], 12);
+
+    // =========================
+    // 2. Définition de quelques lignes STM (démo)
+    //    24, 185, 14 autour de Sherbrooke
+    // =========================
+
+    const ligne24 = [
+      [45.49055, -73.58818], // Atwater
+      [45.49366, -73.58156],
+      [45.49722, -73.57539],
+      [45.50369, -73.56845],
+      [45.50743, -73.56506],
+      [45.50901, -73.56292],
+      [45.51061, -73.56072],
+      [45.51224, -73.55853],
+      [45.51390, -73.55641],
+      [45.51515, -73.55476],
+      [45.51650, -73.55308],
+      [45.51828, -73.55078],
+      [45.51966, -73.54898],
+      [45.52119, -73.54700],
+      [45.52255, -73.54527],
+      [45.52420, -73.54320],
+      [45.52601, -73.54090],
+      [45.52740, -73.53899],
+      [45.52900, -73.53686],
+      [45.53110, -73.53400],
+      [45.53320, -73.53120],
+      [45.53525, -73.52841],
+      [45.53730, -73.52562],
+      [45.53940, -73.52277],
+      [45.54140, -73.52010],
+      [45.54355, -73.51700],
+      [45.54610, -73.51320]  // Honoré-Beaugrand
+    ];
+
+    const ligne185 = [
+      [45.52420, -73.54320], // Papineau
+      [45.52390, -73.53500],
+      [45.52360, -73.52800],
+      [45.52330, -73.52100],
+      [45.52310, -73.51400],
+      [45.52290, -73.50700],
+      [45.52270, -73.50000],
+      [45.52250, -73.49300],
+      [45.52230, -73.48600],
+      [45.52210, -73.47900]
+    ];
+
+    const ligne14 = [
+      [45.5210, -73.5601], // Amherst / Sherbrooke
+      [45.5187, -73.5614],
+      [45.5170, -73.5630],
+      [45.5157, -73.5644],
+      [45.5143, -73.5659]
+    ];
+
+    const lignesSTM = [
+      { num: "24", name: "Ligne 24 - Sherbrooke", color: "blue",  coords: ligne24 },
+      { num: "185", name: "Ligne 185 - Sherbrooke", color: "red",   coords: ligne185 },
+      { num: "14", name: "Ligne 14 - Atateken",     color: "green", coords: ligne14 }
+    ];
+
+    // On garde les polylines affichées pour pouvoir les effacer
+    let displayedLines = [];
+
+    function clearLines() {
+      displayedLines.forEach(l => map.removeLayer(l));
+      displayedLines = [];
+    }
+
+    document.getElementById("clearBtn").addEventListener("click", () => {
+      clearLines();
+      map.closePopup();
     });
-  }
 
-  afficherArrets(arrets24, "blue");
-  afficherArrets(arrets185, "red");
-  afficherArrets(arrets14, "green");
-</script>
+    // =========================
+    // 3. Chercher le nom de la rue avec Overpass (OpenStreetMap)
+    // =========================
+    async function getStreetName(lat, lng) {
+      const query = `
+        [out:json];
+        way(around:20, ${lat}, ${lng})["highway"];
+        out tags;
+      `;
+      try {
+        const res = await fetch("https://overpass-api.de/api/interpreter", {
+          method: "POST",
+          headers: { "Content-Type": "text/plain" },
+          body: query
+        });
+        const json = await res.json();
+        if (json.elements && json.elements.length > 0) {
+          return json.elements[0].tags.name || "Rue inconnue";
+        }
+      } catch (err) {
+        console.error(err);
+      }
+      return "Rue inconnue";
+    }
+
+    // =========================
+    // 4. Lignes proches d’un point cliqué
+    //    (maxDist ≈ 0.001 ≈ ~100 m)
+    // =========================
+    function lignesProches(lat, lng, maxDist = 0.001) {
+      const result = [];
+
+      lignesSTM.forEach(ligne => {
+        for (let i = 0; i < ligne.coords.length; i++) {
+          const p = ligne.coords[i];
+          const dlat = Math.abs(p[0] - lat);
+          const dlng = Math.abs(p[1] - lng);
+          if (dlat < maxDist && dlng < maxDist) {
+            result.push(ligne);
+            break;
+          }
+        }
+      });
+
+      return result;
+    }
+
+    // =========================
+    // 5. Gestion du clic sur la carte
+    // =========================
+    map.on("click", async (e) => {
+      const lat = e.latlng.lat;
+      const lng = e.latlng.lng;
+
+      clearLines();
+
+      // Popup "chargement"
+      const loadingPopup = L.popup()
+        .setLatLng(e.latlng)
+        .setContent("Recherche de la rue et des lignes STM…")
+        .openOn(map);
+
+      const rue = await getStreetName(lat, lng);
+      const lignes = lignesProches(lat, lng);
+
+      // Afficher les lignes trouvées
+      lignes.forEach(ligne => {
+        const poly = L.polyline(ligne.coords, {
+          color: ligne.color,
+          weight: 5,
+          opacity: 0.9
+        }).addTo(map);
+        displayedLines.push(poly);
+      });
+
+      const texteLignes = lignes.length > 0
+        ? lignes.map(l => l.num).join(", ")
+        : "aucune (dans cette démo)";
+
+      loadingPopup.setContent(
+        `<b>Rue :</b> ${rue}<br>` +
+        `<b>Lignes STM :</b> ${texteLignes}`
+      );
+    });
+  </script>
+
+</body>
+</html>
