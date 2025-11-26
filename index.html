@@ -1,78 +1,91 @@
-<!DOCTYPE html>
-<html lang="fr">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0"> <!-- 🔥 obligatoire mobile -->
+<script>
+  const map = L.map('map').setView([45.515, -73.56], 12);
 
-  <title>Détours STM</title>
+  L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    maxZoom: 19
+  }).addTo(map);
 
-  <link rel="stylesheet"
-        href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.css">
 
-  <style>
-    html, body {
-      margin: 0;
-      padding: 0;
-      height: 100%;
-      overflow: hidden;
-      font-family: sans-serif;
-    }
+  // --- LIGNES ---
 
-    /* Carte plein écran */
-    #map {
-      position: absolute;
-      top: 0;
-      left: 0;
-      right: 0;
-      bottom: 0;
-      z-index: 1;
-    }
+  const ligne24 = [
+    [45.50850, -73.57500],
+    [45.50910, -73.55850],
+    [45.51000, -73.54500],
+    [45.51120, -73.53050],
+    [45.51250, -73.51600],
+    [45.51290, -73.50650],
+    [45.51330, -73.50000],
+    [45.51360, -73.49200],
+    [45.51400, -73.48600]
+  ];
 
-    /* Panel flottant */
-    #panel {
-      position: absolute;
-      top: 10px;
-      left: 10px;
-      right: 10px;
-      background: white;
-      padding: 15px;
-      border-radius: 10px;
-      box-shadow: 0 4px 10px rgba(0,0,0,0.25);
-      z-index: 1000;
-    }
-  </style>
-</head>
+  const ligne185 = [
+    [45.52150, -73.56300],
+    [45.52140, -73.55000],
+    [45.52120, -73.53300],
+    [45.52100, -73.52000],
+    [45.52080, -73.51000],
+    [45.52070, -73.50000],
+    [45.52060, -73.49000],
+    [45.52040, -73.48000],
+    [45.52030, -73.47000],
+    [45.52020, -73.46000]
+  ];
 
-<body>
+  const ligne14 = [
+    [45.52440, -73.56850],
+    [45.52100, -73.56050],
+    [45.51800, -73.55800],
+    [45.51490, -73.55600],
+    [45.51230, -73.55300]
+  ];
 
-  <div id="panel">
-    <label>Ligne bus :</label>
-    <input id="ligne" type="text" value="186">
+  L.polyline(ligne24,  { color: "blue",  weight: 4 }).addTo(map);
+  L.polyline(ligne185, { color: "red",   weight: 4 }).addTo(map);
+  L.polyline(ligne14,  { color: "green", weight: 4 }).addTo(map);
 
-    <br><br>
 
-    <button id="clearBtn"
-      style="background:#d9534f;color:white;padding:10px 15px;border:none;border-radius:6px;font-size:16px;">
-      Effacer détour
-    </button>
+  // --- ARRÊTS ---
 
-    <p style="margin-top:10px;">
-      1er clic : <b>début du détour</b> —
-      2e clic : <b>fin du détour</b> → calcul automatique
-    </p>
-  </div>
+  const arrets24 = [
+    { name: "Sherbrooke / Aylmer",       coord: [45.5104, -73.5687] },
+    { name: "Sherbrooke / Saint-Urbain", coord: [45.5110, -73.5660] },
+    { name: "Sherbrooke / Saint-Laurent", coord: [45.5113, -73.5621] },
+    { name: "Sherbrooke / Saint-Dominique", coord: [45.5118, -73.5580] },
+    { name: "Sherbrooke / de Bullion",   coord: [45.5122, -73.5547] }
+  ];
 
-  <div id="map"></div>
+  const arrets185 = [
+    { name: "Sherbrooke / Papineau", coord: [45.5242, -73.5590] },
+    { name: "Sherbrooke / Cartier",  coord: [45.5241, -73.5550] },
+    { name: "Sherbrooke / Frontenac", coord: [45.5238, -73.5511] },
+    { name: "Sherbrooke / d'Iberville", coord: [45.5235, -73.5460] },
+    { name: "Sherbrooke / Dézéry",      coord: [45.5232, -73.5410] }
+  ];
 
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.js"></script>
+  const arrets14 = [
+    { name: "Amherst / Sherbrooke", coord: [45.5210, -73.5601] },
+    { name: "Sherbrooke / Saint-André", coord: [45.5187, -73.5614] },
+    { name: "Sherbrooke / Berri", coord: [45.5170, -73.5630] },
+    { name: "Sherbrooke / Sanguinet", coord: [45.5157, -73.5644] },
+    { name: "Sherbrooke / Saint-Denis", coord: [45.5143, -73.5659] }
+  ];
 
-  <script>
-    const map = L.map('map').setView([45.508, -73.587], 12);
+  function afficherArrets(arrets, couleur) {
+    arrets.forEach(a => {
+      L.circleMarker(a.coord, {
+        radius: 6,
+        color: couleur,
+        fillColor: couleur,
+        fillOpacity: 0.9
+      })
+      .bindPopup(a.name)
+      .addTo(map);
+    });
+  }
 
-    L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
-      maxZoom: 19
-    }).addTo(map);
-  </script>
-
-</body>
-</html>
+  afficherArrets(arrets24, "blue");
+  afficherArrets(arrets185, "red");
+  afficherArrets(arrets14, "green");
+</script>
