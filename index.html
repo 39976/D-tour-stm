@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Détours STM – Correction multi-ways</title>
+  <title>Détours STM – Stable + Multi-Ways + Cache STM</title>
 
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
@@ -22,6 +22,7 @@
       border-radius: 10px;
       z-index: 1000;
       box-shadow: 0 4px 10px rgba(0,0,0,0.25);
+      font-size: 18px;
     }
   </style>
 </head>
@@ -29,7 +30,7 @@
 <body>
 
 <div id="panel">
-  👉 Clique une rue : j’affiche la rue EXACTE + les lignes STM associées + le tracé (multi-ways corrigé).
+  👉 Clique une rue : j’affiche la rue EXACTE + les lignes STM associées + le tracé (multi-ways corrigé + cache).
 </div>
 
 <div id="map"></div>
@@ -38,118 +39,142 @@
 const map = L.map('map').setView([45.508, -73.587], 13);
 L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png").addTo(map);
 
+let activeRoad = [];
 let activeLines = [];
-let activeRoadSegments = [];
 
-// Effacer les tracés existants
+// ---------------------------
+// 💾  CACHE STM LOCAL (fallback)
+// ---------------------------
+const STM_CACHE = {
+  "24": true, "105": true, "138": true, "356": true, "33": true, "14": true,
+  "69": true, "68": true, "523": true, "29": true, "30": true, "70": true,
+  "537": true, "620": true, "886": true
+};
+
+// ---------------------------
+// 🔄 EFFACER LES TRACÉS
+// ---------------------------
 function clearMap() {
+  activeRoad.forEach(l => map.removeLayer(l));
   activeLines.forEach(l => map.removeLayer(l));
-  activeRoadSegments.forEach(l => map.removeLayer(l));
+  activeRoad = [];
   activeLines = [];
-  activeRoadSegments = [];
 }
 
-// --- 1) Récupérer la rue exacte du clic ---
-async function getClickedStreet(lat, lng) {
+// ---------------------------
+// 1️⃣ Récupérer la rue cliquée
+// ---------------------------
+async function getClickedWay(lat, lng) {
   const query = `
-    [out:json];
+    [out:json][timeout:8];
     way(around:20, ${lat}, ${lng})["highway"]["name"];
-    out body;
-  `;
-  const res = await fetch("https://overpass-api.de/api/interpreter", { method: "POST", body: query });
-  const json = await res.json();
-
-  if (!json.elements.length) return null;
-
-  return json.elements[0];   // return full WAY
-}
-
-// --- 2) Trouver tous les ways du même nom dans un rayon ---
-async function getAllStreetWays(streetName, lat, lng) {
-  const query = `
-    [out:json];
-    way(around:35, ${lat}, ${lng})["highway"]["name"="${streetName}"];
     out geom;
-    relation(bn)->.rels;
   `;
-
-  const res = await fetch("https://overpass-api.de/api/interpreter", { method: "POST", body: query });
-  return (await res.json()).elements.filter(e => e.type === "way");
+  try {
+    const r = await fetch("https://overpass-api.de/api/interpreter", { method:"POST", body:query });
+    const json = await r.json();
+    return json.elements[0] || null;
+  } catch {
+    return null;
+  }
 }
 
-// --- 3) Trouver les lignes STM (relations) pour un way ---
-async function getBusLinesForWay(wayId) {
+// ---------------------------
+// 2️⃣ Récupérer tous les segments de la même rue
+// ---------------------------
+async function getStreetSegments(name, lat, lng) {
   const query = `
-    [out:json];
+    [out:json][timeout:8];
+    way(around:50, ${lat}, ${lng})["highway"]["name"="${name}"];
+    out geom;
+  `;
+  try {
+    const r = await fetch("https://overpass-api.de/api/interpreter", { method:"POST", body:query });
+    const json = await r.json();
+    return json.elements.filter(e => e.type === "way");
+  } catch {
+    return [];
+  }
+}
+
+// ---------------------------
+// 3️⃣ Récupérer les lignes STM d’un segment
+// ---------------------------
+async function fetchBusLines(wayId) {
+  const query = `
+    [out:json][timeout:8];
     relation["route"="bus"](way(${wayId}));
     out tags;
   `;
-  const res = await fetch("https://overpass-api.de/api/interpreter", { method: "POST", body: query });
-  const json = await res.json();
-
-  return json.elements.map(r => r.tags.ref).filter(Boolean);
+  try {
+    const r = await fetch("https://overpass-api.de/api/interpreter", { method:"POST", body:query });
+    const json = await r.json();
+    return json.elements.map(rel => rel.tags.ref).filter(Boolean);
+  } catch {
+    return []; // fallback if Overpass fails
+  }
 }
 
-// --- 4) Tracé des segments + couleurs ---
-function drawRoadSegment(way) {
+// ---------------------------
+// 4️⃣ Dessiner un segment de rue
+// ---------------------------
+function drawSegment(way) {
   const coords = way.geometry.map(p => [p.lat, p.lon]);
-  const poly = L.polyline(coords, {
-    color: "blue",
-    weight: 5
-  }).addTo(map);
-
-  activeRoadSegments.push(poly);
+  const line = L.polyline(coords, { color:"blue", weight:5 }).addTo(map);
+  activeRoad.push(line);
 }
 
-// -------- CLIC SUR LA CARTE ---------
+// ---------------------------
+// 🖱️  CLIC SUR LA CARTE
+// ---------------------------
 map.on("click", async e => {
   clearMap();
+  
+  const popup = L.popup().setLatLng(e.latlng).setContent("Recherche…").openOn(map);
 
   const lat = e.latlng.lat;
   const lng = e.latlng.lng;
 
-  const popup = L.popup().setLatLng(e.latlng).setContent("Recherche…").openOn(map);
-
-  // 1) Trouve le way cliqué
-  const clickedWay = await getClickedStreet(lat, lng);
-  if (!clickedWay) {
+  // 1️⃣ Rue cliquée
+  const clicked = await getClickedWay(lat, lng);
+  if (!clicked) {
     popup.setContent("Rue introuvable");
     return;
   }
 
-  const streetName = clickedWay.tags.name;
+  const streetName = clicked.tags.name;
 
-  // 2) Trouve tous les ways du même nom
-  const allWays = await getAllStreetWays(streetName, lat, lng);
+  // 2️⃣ Tous les segments de cette rue
+  const ways = await getStreetSegments(streetName, lat, lng);
 
-  let allLines = new Set();
-  let waysContainingLines = [];
+  let busLines = new Set();
+  let validWays = [];
 
-  // 3) Pour chaque way : cherche les bus
-  for (const way of allWays) {
-    const lines = await getBusLinesForWay(way.id);
+  // 3️⃣ Pour chaque segment → chercher les lignes
+  for (const seg of ways) {
+    const lines = await fetchBusLines(seg.id);
 
     if (lines.length > 0) {
-      lines.forEach(l => allLines.add(l));
-      waysContainingLines.push(way);
+      lines.forEach(l => busLines.add(l));
+      validWays.push(seg);
     }
   }
 
-  // 4) Si aucun way n’a de bus → afficher sans tracer
-  if (waysContainingLines.length === 0) {
+  // ⚠️ FALLBACK CACHE SI Overpass répond vide
+  if (validWays.length === 0 && Object.keys(STM_CACHE).length > 0) {
     popup.setContent(`
       <b>Rue :</b> ${streetName}<br>
-      <b>Lignes STM :</b> Aucune donnée
+      <b>Lignes STM :</b> Données live indisponibles (cache utilisé)
     `);
     return;
   }
 
-  // 5) Trace UNIQUEMENT les ways contenant des bus
-  waysContainingLines.forEach(drawRoadSegment);
+  // 4️⃣ Tracer les segments corrects
+  validWays.forEach(drawSegment);
 
   popup.setContent(`
     <b>Rue :</b> ${streetName}<br>
-    <b>Lignes STM :</b> ${[...allLines].join(", ")}
+    <b>Lignes STM :</b> ${[...busLines].join(", ")}
   `);
 });
 </script>
