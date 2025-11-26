@@ -56,7 +56,6 @@ const lineColors = {
 
 let activeLines = [];
 
-// Effacer les tracés existants
 function clearLines() {
   activeLines.forEach(l => map.removeLayer(l));
   activeLines = [];
@@ -76,7 +75,6 @@ async function getStreetName(lat, lng) {
   });
 
   const json = await res.json();
-
   if (!json.elements || json.elements.length === 0) return "Rue inconnue";
   return json.elements[0].tags.name || "Rue inconnue";
 }
@@ -97,15 +95,12 @@ function drawLines(lines, lat, lng) {
   });
 }
 
-// Clic sur la carte
 map.on("click", async e => {
   const lat = e.latlng.lat;
   const lng = e.latlng.lng;
 
   const popup = L.popup().setLatLng(e.latlng).setContent("Recherche…").openOn(map);
-
   const street = await getStreetName(lat, lng);
-
   const lines = streetLines[street] || [];
 
   drawLines(lines, lat, lng);
