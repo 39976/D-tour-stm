@@ -1,195 +1,142 @@
 <!DOCTYPE html>
 <html lang="fr">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Détours STM</title>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Détours STM</title>
 
-  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
-  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<!-- Leaflet -->
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 
-  <style>
-    html, body { height: 100%; margin: 0; padding: 0; }
-    #map { height: 100%; width: 100%; }
-    #panel {
-      position: absolute;
-      top: 10px;
-      left: 10px;
-      right: 10px;
-      background: white;
-      padding: 12px;
-      border-radius: 12px;
-      z-index: 1000;
-      font-size: 18px;
-      box-shadow: 0 4px 10px rgba(0,0,0,0.3);
-    }
-  </style>
+<style>
+  html, body {
+    height: 100%;
+    margin: 0;
+    padding: 0;
+  }
+  #map {
+    height: 100%;
+    width: 100%;
+  }
+
+  .floatingBox {
+    position: fixed;
+    top: 10px;
+    left: 10px;
+    background: white;
+    padding: 12px;
+    border-radius: 12px;
+    font-size: 18px;
+    max-width: 90%;
+    box-shadow: 0 0 8px rgba(0,0,0,0.25);
+    z-index: 9999;
+  }
+</style>
 </head>
 
 <body>
 
-<div id="panel">
-  👉 Clique une rue : j’affiche la rue EXACTE + les lignes STM + le tracé réel.
+<div class="floatingBox">
+👉 Clique une rue : j'affiche la rue EXACTE + les lignes STM + le tracé.
 </div>
 
 <div id="map"></div>
 
 <script>
-const map = L.map('map').setView([45.508, -73.587], 14);
-L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png").addTo(map);
+/* 🔵 INITIALISATION DE LA MAP */
+const map = L.map("map").setView([45.5048, -73.5772], 15);
 
-let activeLineLayers = [];
+L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
+  maxZoom: 19,
+}).addTo(map);
 
-// =======================
-// 1️⃣ Dictionnaire STM intelligent
-// =======================
-const stmDatabase = [
-  {
-    keywords: ["sherbrooke", "sherbrooke ouest", "sherbrooke west", "sherbrooke st w", "rue sherbrooke", "rue sherbrooke ouest", "sherbrooke street west"],
-    lines: ["24", "105", "138", "356"]
-  }
-];
+let currentPolyline = null;
 
-// =======================
-// Trouve les lignes STM d’après un nom imparfait
-// =======================
+/* 🔵 NORMALISATION : transforme toute variante → clé canonique */
+function normalizeStreetName(name) {
+  const n = name.toLowerCase();
+
+  if (n.includes("sherbrooke")) return "SHERBROOKE";
+  if (n.includes("peel")) return "PEEL";
+  if (n.includes("crescent")) return "CRESCENT";
+  if (n.includes("guy")) return "GUY";
+  if (n.includes("saint-catherine") || n.includes("sainte-catherine"))
+    return "SAINTE-CATHERINE";
+
+  return name.toUpperCase();
+}
+
+/* 🔵 BASE DE DONNÉES STM — normalisée */
+const stmDatabase = {
+  "SHERBROOKE": ["24", "105", "138", "356"],
+  "PEEL": ["107"],
+  "GUY": ["66", "435"],
+  "SAINTE-CATHERINE": ["15"],
+  "CRESCENT": []
+};
+
+/* 🔵 Trouve lignes STM */
 function findSTMlines(name) {
-  const clean = name.toLowerCase().replace(/-/g, " ").trim();
-
-  for (const entry of stmDatabase) {
-    if (entry.keywords.some(k => clean.includes(k))) {
-      return entry.lines;
-    }
-  }
-
-  return []; // rien trouvé
+  const key = normalizeStreetName(name);
+  return stmDatabase[key] || [];
 }
 
-// =======================
-// Nettoyer les tracés
-// =======================
-function clearStreet() {
-  activeLineLayers.forEach(l => map.removeLayer(l));
-  activeLineLayers = [];
-}
+/* 🔵 CLIC SUR LA CARTE → détecte la vraie rue */
+map.on("click", async function (e) {
+  const lat = e.latlng.lat;
+  const lon = e.latlng.lng;
 
-// =======================
-// Variantes Overpass
-// =======================
-function nameVariants(name) {
-  if (!name) return [];
+  const url = `
+    https://overpass-api.de/api/interpreter?data=[out:json];
+    way(around:15,${lat},${lon})["highway"]["name"];
+    (._;>;);
+    out;
+  `.replace(/\s+/g, "");
 
-  const base = name.replace("Rue ", "").trim();
+  try {
+    const r = await fetch(url);
+    const data = await r.json();
+    if (!data.elements.length) return;
 
-  return [
-    base,
-    "Rue " + base,
-    base + " Ouest",
-    base + " West",
-    "Rue " + base + " Ouest",
-    "Rue " + base + " West",
-    base.replace("Ouest", "West"),
-    base.replace("West", "Ouest")
-  ];
-}
+    /* Récupère le 1er way avec name */
+    const way = data.elements.find(el => el.type === "way" && el.tags && el.tags.name);
+    if (!way) return;
 
-// =======================
-// Récupère le tracé exact depuis OSM
-// =======================
-async function fetchOSMWay(fullName, lat, lng) {
-  const query = `
-    [out:json];
-    way["name"="${fullName}"](around:80,${lat},${lng});
-    out geom;
-  `;
+    const streetName = way.tags.name;
 
-  const res = await fetch("https://overpass-api.de/api/interpreter", {
-    method: "POST",
-    body: query
-  });
+    /* 🔵 Normalisation pour STM */
+    const stmKey = normalizeStreetName(streetName);
+    const stmLines = findSTMlines(streetName);
 
-  const json = await res.json();
-  return json.elements || [];
-}
+    /* 🔵 TRACÉ : liste des nodes → lat/lng */
+    const nodes = way.nodes
+      .map(nid => data.elements.find(el => el.id === nid && el.type === "node"))
+      .filter(Boolean)
+      .map(n => [n.lat, n.lon]);
 
-let lastLat = 0, lastLng = 0;
+    if (currentPolyline) map.removeLayer(currentPolyline);
 
-// =======================
-// Dessiner la rue
-// =======================
-function drawOSMWay(way) {
-  const coords = way.geometry.map(pt => [pt.lat, pt.lon]);
+    currentPolyline = L.polyline(nodes, {
+      color: "blue",
+      weight: 6,
+      opacity: 0.7
+    }).addTo(map);
 
-  const poly = L.polyline(coords, {
-    color: "yellow",
-    weight: 7
-  }).addTo(map);
+    /* 🔵 Popup */
+    const popupContent = `
+      <b>Rue :</b> ${streetName}<br>
+      <b>Lignes STM :</b> ${stmLines.length ? stmLines.join(", ") : "Aucune donnée"}
+    `;
 
-  activeLineLayers.push(poly);
-}
+    L.popup()
+      .setLatLng(e.latlng)
+      .setContent(popupContent)
+      .openOn(map);
 
-// =======================
-// CLIC SUR LA CARTE
-// =======================
-map.on("click", async e => {
-  lastLat = e.latlng.lat;
-  lastLng = e.latlng.lng;
-
-  const popup = L.popup().setLatLng(e.latlng).setContent("Recherche…").openOn(map);
-
-  // --- 1. Trouver un nom brut
-  const query = `
-    [out:json];
-    way(around:20, ${lastLat}, ${lastLng})["highway"]["name"];
-    out tags;
-  `;
-  const res = await fetch("https://overpass-api.de/api/interpreter", { method: "POST", body: query });
-  const json = await res.json();
-
-  if (!json.elements.length) {
-    popup.setContent("Rue inconnue");
-    return;
+  } catch (err) {
+    console.error("Erreur Overpass:", err);
   }
-
-  const rawName = json.elements[0].tags.name;
-
-  clearStreet();
-
-  // --- 2. Tester toutes les variantes
-  const variants = nameVariants(rawName);
-  let foundWays = null;
-  let goodName = rawName;
-
-  for (let v of variants) {
-    const ways = await fetchOSMWay(v, lastLat, lastLng);
-    if (ways.length) {
-      foundWays = ways;
-      goodName = v;
-      break;
-    }
-  }
-
-  // Dernier recours : nom brut
-  if (!foundWays) {
-    const direct = await fetchOSMWay(rawName, lastLat, lastLng);
-    if (direct.length) {
-      foundWays = direct;
-      goodName = rawName;
-    }
-  }
-
-  // --- 3. Tracer
-  if (foundWays) {
-    foundWays.forEach(way => drawOSMWay(way));
-  }
-
-  // --- 4. Trouver les lignes STM (même si nom bizarre)
-  const lines = findSTMlines(goodName);
-
-  popup.setContent(`
-    <b>Rue :</b> ${goodName}<br>
-    <b>Lignes STM :</b> ${lines.length ? lines.join(", ") : "Aucune donnée"}
-  `);
 });
 </script>
 
