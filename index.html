@@ -1,180 +1,174 @@
 <!DOCTYPE html>
 <html lang="fr">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Détours STM – Stable + Multi-Ways + Cache STM</title>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Détours STM – Stable No-Block</title>
 
-  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
-  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 
-  <style>
-    html, body { height: 100%; margin: 0; padding: 0; }
-    #map { height: 100%; width: 100%; }
-
-    #panel {
-      position: absolute;
-      top: 10px;
-      left: 10px;
-      right: 10px;
-      background: white;
-      padding: 10px;
-      border-radius: 10px;
-      z-index: 1000;
-      box-shadow: 0 4px 10px rgba(0,0,0,0.25);
-      font-size: 18px;
-    }
-  </style>
+<style>
+  html, body { height: 100%; margin:0; padding:0; }
+  #map { height:100%; width:100%; }
+  #panel {
+    position:absolute; top:10px; left:10px; right:10px;
+    background:white; padding:10px; border-radius:12px;
+    font-size:18px; z-index:1000;
+    box-shadow:0 4px 12px rgba(0,0,0,0.25);
+  }
+</style>
 </head>
 
 <body>
 
 <div id="panel">
-  👉 Clique une rue : j’affiche la rue EXACTE + les lignes STM associées + le tracé (multi-ways corrigé + cache).
+👉 Clique une rue : j’affiche la rue EXACTE + les lignes STM + tracé.  
+💡 **Version ultra-stable (anti-bug “Recherche…”)**
 </div>
 
 <div id="map"></div>
 
 <script>
-const map = L.map('map').setView([45.508, -73.587], 13);
+const map = L.map("map").setView([45.508, -73.587], 13);
 L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png").addTo(map);
 
 let activeRoad = [];
-let activeLines = [];
 
-// ---------------------------
-// 💾  CACHE STM LOCAL (fallback)
-// ---------------------------
-const STM_CACHE = {
-  "24": true, "105": true, "138": true, "356": true, "33": true, "14": true,
-  "69": true, "68": true, "523": true, "29": true, "30": true, "70": true,
-  "537": true, "620": true, "886": true
-};
-
-// ---------------------------
-// 🔄 EFFACER LES TRACÉS
-// ---------------------------
-function clearMap() {
-  activeRoad.forEach(l => map.removeLayer(l));
-  activeLines.forEach(l => map.removeLayer(l));
-  activeRoad = [];
-  activeLines = [];
+// Timeout sécurisé
+function timeoutPromise(ms) {
+  return new Promise((resolve, reject) =>
+    setTimeout(() => reject("timeout"), ms)
+  );
 }
 
-// ---------------------------
-// 1️⃣ Récupérer la rue cliquée
-// ---------------------------
+// Effacer
+function clearMap() {
+  activeRoad.forEach(l => map.removeLayer(l));
+  activeRoad = [];
+}
+
+// 1️⃣ Way cliqué
 async function getClickedWay(lat, lng) {
-  const query = `
-    [out:json][timeout:8];
+  const q = `
+    [out:json][timeout:3];
     way(around:20, ${lat}, ${lng})["highway"]["name"];
     out geom;
   `;
+
   try {
-    const r = await fetch("https://overpass-api.de/api/interpreter", { method:"POST", body:query });
-    const json = await r.json();
+    const res = await Promise.race([
+      fetch("https://overpass-api.de/api/interpreter", { method:"POST", body:q }),
+      timeoutPromise(2500)
+    ]);
+    const json = await res.json();
     return json.elements[0] || null;
-  } catch {
+  } catch (e) {
     return null;
   }
 }
 
-// ---------------------------
-// 2️⃣ Récupérer tous les segments de la même rue
-// ---------------------------
+// 2️⃣ Tous les segments
 async function getStreetSegments(name, lat, lng) {
-  const query = `
-    [out:json][timeout:8];
-    way(around:50, ${lat}, ${lng})["highway"]["name"="${name}"];
+  const q = `
+    [out:json][timeout:3];
+    way(around:40, ${lat}, ${lng})["highway"]["name"="${name}"];
     out geom;
   `;
   try {
-    const r = await fetch("https://overpass-api.de/api/interpreter", { method:"POST", body:query });
-    const json = await r.json();
+    const res = await Promise.race([
+      fetch("https://overpass-api.de/api/interpreter", { method:"POST", body:q }),
+      timeoutPromise(2500)
+    ]);
+    const json = await res.json();
     return json.elements.filter(e => e.type === "way");
+  } catch (e) {
+    return [];
+  }
+}
+
+// 3️⃣ Lignes STM sur way
+async function getLines(wayId) {
+  const q = `
+    [out:json][timeout:3];
+    relation["route"="bus"](way(${wayId}));
+    out tags;
+  `;
+  try {
+    const res = await Promise.race([
+      fetch("https://overpass-api.de/api/interpreter", { method:"POST", body:q }),
+      timeoutPromise(2500)
+    ]);
+    const json = await res.json();
+    return json.elements.map(r => r.tags.ref).filter(Boolean);
   } catch {
     return [];
   }
 }
 
-// ---------------------------
-// 3️⃣ Récupérer les lignes STM d’un segment
-// ---------------------------
-async function fetchBusLines(wayId) {
-  const query = `
-    [out:json][timeout:8];
-    relation["route"="bus"](way(${wayId}));
-    out tags;
-  `;
-  try {
-    const r = await fetch("https://overpass-api.de/api/interpreter", { method:"POST", body:query });
-    const json = await r.json();
-    return json.elements.map(rel => rel.tags.ref).filter(Boolean);
-  } catch {
-    return []; // fallback if Overpass fails
-  }
+// 4️⃣ tracer
+function drawSeg(way) {
+  const c = way.geometry.map(p => [p.lat, p.lon]);
+  const l = L.polyline(c, { color:"blue", weight:5 }).addTo(map);
+  activeRoad.push(l);
 }
 
-// ---------------------------
-// 4️⃣ Dessiner un segment de rue
-// ---------------------------
-function drawSegment(way) {
-  const coords = way.geometry.map(p => [p.lat, p.lon]);
-  const line = L.polyline(coords, { color:"blue", weight:5 }).addTo(map);
-  activeRoad.push(line);
-}
-
-// ---------------------------
-// 🖱️  CLIC SUR LA CARTE
-// ---------------------------
+// 🖱️ CLIC
 map.on("click", async e => {
   clearMap();
-  
-  const popup = L.popup().setLatLng(e.latlng).setContent("Recherche…").openOn(map);
 
-  const lat = e.latlng.lat;
-  const lng = e.latlng.lng;
+  const popup = L.popup()
+    .setLatLng(e.latlng)
+    .setContent("Recherche…")
+    .openOn(map);
 
-  // 1️⃣ Rue cliquée
+  const { lat, lng } = e.latlng;
+
+  // Étape 1 : rue cliquée
   const clicked = await getClickedWay(lat, lng);
   if (!clicked) {
     popup.setContent("Rue introuvable");
     return;
   }
 
-  const streetName = clicked.tags.name;
+  const name = clicked.tags.name;
 
-  // 2️⃣ Tous les segments de cette rue
-  const ways = await getStreetSegments(streetName, lat, lng);
+  // Étape 2 : tous les segments
+  const segments = await getStreetSegments(name, lat, lng);
 
-  let busLines = new Set();
-  let validWays = [];
+  if (segments.length === 0) {
+    popup.setContent(`<b>Rue :</b> ${name}<br>Aucun segment trouvé.`);
+    return;
+  }
 
-  // 3️⃣ Pour chaque segment → chercher les lignes
-  for (const seg of ways) {
-    const lines = await fetchBusLines(seg.id);
+  // Étape 3 : lignes STM sur chaque segment
+  let all = new Set();
+  let valids = [];
+
+  for (const s of segments) {
+    const lines = await getLines(s.id);
 
     if (lines.length > 0) {
-      lines.forEach(l => busLines.add(l));
-      validWays.push(seg);
+      lines.forEach(x => all.add(x));
+      valids.push(s);
     }
   }
 
-  // ⚠️ FALLBACK CACHE SI Overpass répond vide
-  if (validWays.length === 0 && Object.keys(STM_CACHE).length > 0) {
+  // Si aucun segment n’a de lignes STM → on affiche quand même
+  if (valids.length === 0) {
     popup.setContent(`
-      <b>Rue :</b> ${streetName}<br>
-      <b>Lignes STM :</b> Données live indisponibles (cache utilisé)
+      <b>Rue :</b> ${name}<br>
+      <b>Lignes STM :</b> Aucune donnée.
     `);
     return;
   }
 
-  // 4️⃣ Tracer les segments corrects
-  validWays.forEach(drawSegment);
+  // Tracer les bons segments
+  valids.forEach(drawSeg);
 
   popup.setContent(`
-    <b>Rue :</b> ${streetName}<br>
-    <b>Lignes STM :</b> ${[...busLines].join(", ")}
+    <b>Rue :</b> ${name}<br>
+    <b>Lignes STM :</b> ${[...all].join(", ")}
   `);
 });
 </script>
