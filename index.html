@@ -37,16 +37,15 @@ html, body { height: 100%; margin: 0; padding: 0; }
 const map = L.map("map").setView([45.5017, -73.5673], 15);
 L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom: 19 }).addTo(map);
 
-// couche du tracé (L.polyline au lieu GeoJSON)
 let streetLine = L.layerGroup().addTo(map);
 
-// serveur Overpass qui fonctionne sur Pages
 const OVERPASS_URL = "https://overpass.kumi.systems/api/interpreter";
 
+// 🔥 NO AREA → Requête universelle qui fonctionne PARTOUT
 async function getStreetGeometry(streetName) {
     const query = `
-        [out:json];
-        way["name"="${streetName}"](area:3600065713);
+        [out:json][timeout:25];
+        way["name"="${streetName}"];
         out geom;
     `;
 
@@ -63,9 +62,8 @@ map.on("click", async function (e) {
     const lat = e.latlng.lat;
     const lon = e.latlng.lng;
 
-    // reverse → nom exact
     const rev = await fetch(
-        `https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lon}&format=json`
+        `https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lon}&format=json&zoom=18&addressdetails=1`
     ).then(r => r.json());
 
     if (!rev.address || !rev.address.road) {
@@ -74,21 +72,22 @@ map.on("click", async function (e) {
     }
 
     const street = rev.address.road;
-
-    // Lignes STM (si présentes)
     const stmLines = rev.extratags?.bus_routes || "Aucune donnée";
 
-    // tracé exact
+    // Tracé exact
     const overpass = await getStreetGeometry(street);
 
     streetLine.clearLayers();
+
+    if (!overpass.elements.length) {
+        console.log("Aucun tracé trouvé pour", street);
+    }
 
     overpass.elements.forEach(w => {
         const coords = w.geometry.map(p => [p.lat, p.lon]);
         L.polyline(coords, { color: "purple", weight: 6 }).addTo(streetLine);
     });
 
-    // popup
     L.popup()
         .setLatLng(e.latlng)
         .setContent(`
