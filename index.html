@@ -11,7 +11,6 @@
   <style>
     html, body { height: 100%; margin: 0; padding: 0; }
     #map { height: 100%; width: 100%; }
-
     #panel {
       position: absolute;
       top: 10px;
@@ -41,28 +40,42 @@ L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png").addTo(map);
 
 let activeLineLayers = [];
 
-// --- Base STM (à étendre plus tard) ---
-const streetLines = {
-  "Sherbrooke": ["24", "105", "138", "356"],
-  "Sherbrooke Ouest": ["24", "105", "138", "356"],
-  "Rue Sherbrooke Ouest": ["24", "105", "138", "356"],
-  "Sherbrooke Street West": ["24", "105", "138", "356"]
-};
+// =======================
+// 1️⃣ Dictionnaire STM intelligent
+// =======================
+const stmDatabase = [
+  {
+    keywords: ["sherbrooke", "sherbrooke ouest", "sherbrooke west", "sherbrooke st w", "rue sherbrooke", "rue sherbrooke ouest", "sherbrooke street west"],
+    lines: ["24", "105", "138", "356"]
+  }
+];
 
-const lineColors = {
-  "24": "blue",
-  "105": "red",
-  "138": "green",
-  "356": "purple"
-};
+// =======================
+// Trouve les lignes STM d’après un nom imparfait
+// =======================
+function findSTMlines(name) {
+  const clean = name.toLowerCase().replace(/-/g, " ").trim();
 
-// NETTOYER TRACÉ
+  for (const entry of stmDatabase) {
+    if (entry.keywords.some(k => clean.includes(k))) {
+      return entry.lines;
+    }
+  }
+
+  return []; // rien trouvé
+}
+
+// =======================
+// Nettoyer les tracés
+// =======================
 function clearStreet() {
   activeLineLayers.forEach(l => map.removeLayer(l));
   activeLineLayers = [];
 }
 
-// --- TESTE TOUTES LES VARIANTES DE NOM ---
+// =======================
+// Variantes Overpass
+// =======================
 function nameVariants(name) {
   if (!name) return [];
 
@@ -80,11 +93,13 @@ function nameVariants(name) {
   ];
 }
 
-// --- RECHERCHE LA RUE DANS OSM (TRACÉ COMPLET) ---
-async function fetchOSMWay(fullName) {
+// =======================
+// Récupère le tracé exact depuis OSM
+// =======================
+async function fetchOSMWay(fullName, lat, lng) {
   const query = `
     [out:json];
-    way["name"="${fullName}"](around:50,${lastLat},${lastLng});
+    way["name"="${fullName}"](around:80,${lat},${lng});
     out geom;
   `;
 
@@ -99,7 +114,9 @@ async function fetchOSMWay(fullName) {
 
 let lastLat = 0, lastLng = 0;
 
-// --- DESSINE LE TRACÉ EXACT ---
+// =======================
+// Dessiner la rue
+// =======================
 function drawOSMWay(way) {
   const coords = way.geometry.map(pt => [pt.lat, pt.lon]);
 
@@ -111,20 +128,22 @@ function drawOSMWay(way) {
   activeLineLayers.push(poly);
 }
 
-// --- HANDLE CLICK ---
+// =======================
+// CLIC SUR LA CARTE
+// =======================
 map.on("click", async e => {
   lastLat = e.latlng.lat;
   lastLng = e.latlng.lng;
 
   const popup = L.popup().setLatLng(e.latlng).setContent("Recherche…").openOn(map);
 
-  // Récupérer le nom brut de la rue (n’importe laquelle)
-  const nameQuery = `
+  // --- 1. Trouver un nom brut
+  const query = `
     [out:json];
-    way(around:15, ${lastLat}, ${lastLng})["highway"]["name"];
+    way(around:20, ${lastLat}, ${lastLng})["highway"]["name"];
     out tags;
   `;
-  const res = await fetch("https://overpass-api.de/api/interpreter", { method: "POST", body: nameQuery });
+  const res = await fetch("https://overpass-api.de/api/interpreter", { method: "POST", body: query });
   const json = await res.json();
 
   if (!json.elements.length) {
@@ -136,11 +155,43 @@ map.on("click", async e => {
 
   clearStreet();
 
-  let found = null;
+  // --- 2. Tester toutes les variantes
+  const variants = nameVariants(rawName);
+  let foundWays = null;
   let goodName = rawName;
 
-  // TESTER TOUTES LES VARIANTES
-  const variants = nameVariants(rawName);
-
   for (let v of variants) {
-    const ways = await fetchOSMWay(v);
+    const ways = await fetchOSMWay(v, lastLat, lastLng);
+    if (ways.length) {
+      foundWays = ways;
+      goodName = v;
+      break;
+    }
+  }
+
+  // Dernier recours : nom brut
+  if (!foundWays) {
+    const direct = await fetchOSMWay(rawName, lastLat, lastLng);
+    if (direct.length) {
+      foundWays = direct;
+      goodName = rawName;
+    }
+  }
+
+  // --- 3. Tracer
+  if (foundWays) {
+    foundWays.forEach(way => drawOSMWay(way));
+  }
+
+  // --- 4. Trouver les lignes STM (même si nom bizarre)
+  const lines = findSTMlines(goodName);
+
+  popup.setContent(`
+    <b>Rue :</b> ${goodName}<br>
+    <b>Lignes STM :</b> ${lines.length ? lines.join(", ") : "Aucune donnée"}
+  `);
+});
+</script>
+
+</body>
+</html>
