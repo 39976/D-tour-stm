@@ -3,14 +3,27 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Détours STM – Rue + lignes</title>
+  <title>Détours STM – Rue + vraies lignes STM</title>
 
-  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <!-- Leaflet -->
+  <link
+    rel="stylesheet"
+    href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+  />
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 
   <style>
-    html, body { height: 100%; margin: 0; padding: 0; }
-    #map { height: 100%; width: 100%; }
+    html,
+    body {
+      height: 100%;
+      margin: 0;
+      padding: 0;
+    }
+
+    #map {
+      height: 100%;
+      width: 100%;
+    }
 
     #panel {
       position: absolute;
@@ -21,77 +34,145 @@
       padding: 10px;
       border-radius: 10px;
       z-index: 1000;
-      box-shadow: 0 4px 10px rgba(0,0,0,0.25);
-      font-size: 18px;
+      box-shadow: 0 4px 10px rgba(0, 0, 0, 0.25);
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+      font-size: 14px;
+    }
+
+    #status {
+      margin-top: 4px;
+      font-size: 12px;
+      color: #666;
     }
   </style>
 </head>
 
 <body>
+  <div id="panel">
+    👉 Clique une rue : j’affiche la rue EXACTE + toutes les lignes STM qui y passent.
+    <div id="status"></div>
+  </div>
 
-<div id="panel">
-  👉 Clique une rue : j’affiche la rue EXACTE + les lignes STM associées.
-</div>
+  <div id="map"></div>
 
-<div id="map"></div>
+  <script>
+    // ======================= 1. Initialisation carte =======================
+    const map = L.map("map").setView([45.508, -73.587], 13);
 
-<script>
-const map = L.map('map').setView([45.508, -73.587], 13);
-L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png").addTo(map);
+    L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
+      maxZoom: 19,
+      attribution: "&copy; OpenStreetMap"
+    }).addTo(map);
 
-// --- Exemple : lignes STM pour chaque rue ---
-const streetLines = {
-  "Rue Sherbrooke Ouest": ["24", "105", "138", "356"],
-  "Rue Sherbrooke Est": ["24", "125", "185", "356"]
-};
+    const statusDiv = document.getElementById("status");
+    function setStatus(msg) {
+      statusDiv.textContent = msg || "";
+    }
 
-// Couleurs pour les lignes STM
-const lineColors = {
-  "24": "blue",
-  "105": "red",
-  "138": "green",
-  "356": "purple",
-  "125": "orange",
-  "185": "brown"
-};
+    // ======================= 2. Gestion des segments dessinés =======================
+    let activeStreetPolylines = [];
 
-let activeSegments = [];
-let activeBusLines = [];
+    function clearStreet() {
+      activeStreetPolylines.forEach((p) => map.removeLayer(p));
+      activeStreetPolylines = [];
+    }
 
-// --- Effacer anciens tracés ---
-function clearAll() {
-  activeSegments.forEach(s => map.removeLayer(s));
-  activeSegments = [];
+    function drawStreetSegments(segments) {
+      clearStreet();
 
-  activeBusLines.forEach(l => map.removeLayer(l));
-  activeBusLines = [];
-}
+      segments.forEach((seg) => {
+        if (!seg.geometry || seg.geometry.length < 2) return;
 
-// --- Trouver le NOM EXACT de la rue ---
-async function getStreetName(lat, lng) {
-  const query = `
-    [out:json][timeout:25];
-    way(around:12, ${lat}, ${lng})["highway"]["name"];
-    out tags;
-  `;
+        const coords = seg.geometry.map((pt) => [pt.lat, pt.lon]);
 
-  const res = await fetch("https://overpass-api.de/api/interpreter", {
-    method: "POST",
-    body: query
-  });
+        const poly = L.polyline(coords, {
+          color: "#7b3fe4",        // violet mais cette fois SUR la rue
+          weight: 6,
+          opacity: 0.9
+        }).addTo(map);
 
-  const json = await res.json();
-  if (!json.elements.length) return null;
-  return json.elements[0].tags.name;
-}
+        activeStreetPolylines.push(poly);
+      });
+    }
 
-// --- Récupérer tous les SEGMENTS RÉELS de la rue ---
-async function getStreetSegments(streetName) {
-  const query = `
-    [out:json][timeout:25];
-    way["highway"]["name"="${streetName}"];
-    (._;>;);
-    out geom;
-  `;
+    // ======================= 3. Overpass helpers =======================
+    const OVERPASS_URL = "https://overpass-api.de/api/interpreter";
 
-  const
+    async function overpassQuery(query) {
+      try {
+        const res = await fetch(OVERPASS_URL, {
+          method: "POST",
+          headers: { "Content-Type": "text/plain" },
+          body: query
+        });
+
+        if (!res.ok) {
+          throw new Error("HTTP " + res.status);
+        }
+
+        return await res.json();
+      } catch (err) {
+        console.error("Erreur Overpass :", err);
+        throw err;
+      }
+    }
+
+    // ---------- 3.a Trouver le nom EXACT de la rue cliquée ----------
+    async function getStreetName(lat, lng) {
+      const query = `
+        [out:json][timeout:25];
+        way(around:20, ${lat}, ${lng})["highway"]["name"];
+        out tags;
+      `;
+
+      const json = await overpassQuery(query);
+
+      if (!json.elements || json.elements.length === 0) {
+        return null;
+      }
+
+      // On prend le premier nom trouvé
+      return json.elements[0].tags.name || null;
+    }
+
+    // ---------- 3.b Récupérer TOUS les segments de la rue autour du clic ----------
+    async function getStreetSegments(streetName, lat, lng) {
+      if (!streetName) return [];
+
+      const query = `
+        [out:json][timeout:25];
+        way(around:250, ${lat}, ${lng})["highway"]["name"="${streetName}"];
+        out geom;
+      `;
+
+      const json = await overpassQuery(query);
+      return json.elements || [];
+    }
+
+    // ---------- 3.c Trouver toutes les lignes STM utilisant ces segments ----------
+    async function getStmLinesForSegments(segments) {
+      if (!segments.length) return [];
+
+      // On construit une liste de rel(bw:ID) pour chaque segment
+      const relSelectors = segments
+        .map((seg) => `rel(bw:${seg.id})["route"="bus"]["network"~"STM"];`)
+        .join("\n");
+
+      const query = `
+        [out:json][timeout:25];
+        (
+          ${relSelectors}
+        );
+        out tags;
+      `;
+
+      const json = await overpassQuery(query);
+      if (!json.elements) return [];
+
+      const refs = new Set();
+
+      json.elements.forEach((rel) => {
+        if (!rel.tags) return;
+
+        // La plupart des lignes STM ont ref=24, 105, 138, etc.
+        const ref = rel.tags.ref || rel.tags.name
