@@ -1,29 +1,33 @@
 <!DOCTYPE html>
 <html lang="fr">
 <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Détours STM</title>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Détours STM</title>
 
-    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
-    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 
-    <style>
-        html, body { height: 100%; margin: 0; padding: 0; }
-        #map { height: 100%; width: 100%; }
-        .info-box {
-            position: absolute;
-            top: 10px; left: 10px;
-            background: white; padding: 15px;
-            border-radius: 10px; font-size: 18px;
-            box-shadow: 0 0 10px rgba(0,0,0,0.2);
-            z-index: 1000;
-        }
-    </style>
+<style>
+html, body { height: 100%; margin: 0; padding: 0; }
+#map { height: 100%; width: 100%; }
+
+.info-box {
+    position: absolute;
+    top: 10px; left: 10px;
+    background: white;
+    padding: 15px;
+    border-radius: 10px;
+    font-size: 18px;
+    box-shadow: 0 0 10px rgba(0,0,0,0.2);
+    z-index: 1000;
+}
+</style>
 </head>
+
 <body>
 
-<div class="info-box">👉 Clique une rue : j’affiche la rue EXACTE + lignes STM + tracé.</div>
+<div class="info-box">👉 Clique une rue : j’affiche la rue EXACTE + les lignes STM + le tracé.</div>
 <div id="map"></div>
 
 <script>
@@ -31,47 +35,51 @@ const map = L.map("map").setView([45.5017, -73.5673], 15);
 L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom: 19 }).addTo(map);
 
 let streetLayer = L.geoJSON(null, {
-    style: { color: "#7c00ff", weight: 6 }
+    style: { color: "purple", weight: 6 }
 }).addTo(map);
 
 const stmLines = [
-    { name: "24", streets: ["Sherbrooke"] },
-    { name: "105", streets: ["Sherbrooke"] },
-    { name: "138", streets: ["Sherbrooke"] },
-    { name: "356", streets: ["Sherbrooke"] }
+    { line: "24", streets: ["Sherbrooke"] },
+    { line: "105", streets: ["Sherbrooke"] },
+    { line: "138", streets: ["Sherbrooke"] },
+    { line: "356", streets: ["Sherbrooke"] }
 ];
 
 map.on("click", async function(e) {
+
     const lat = e.latlng.lat;
     const lon = e.latlng.lng;
 
-    const reverseUrl = `https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lon}&format=json`;
-    const data = await fetch(reverseUrl).then(r => r.json());
+    const rev = await fetch(`https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lon}&format=json`)
+                        .then(r => r.json());
 
-    if (!data.address || !data.address.road) {
+    if (!rev.address || !rev.address.road) {
         alert("Rue inconnue.");
         return;
     }
 
-    const street = data.address.road;
+    const street = rev.address.road;
 
-    const matching = stmLines
+    // Trouver les lignes STM associées
+    const lines = stmLines
         .filter(l => l.streets.some(s => street.includes(s)))
-        .map(l => l.name);
+        .map(l => l.line);
 
-    const searchUrl = `https://nominatim.openstreetmap.org/search?street=${encodeURIComponent(street)}&city=Montréal&format=json&polygon_geojson=1`;
-    const json = await fetch(searchUrl).then(r => r.json());
+    // Récupérer le tracé exact
+    const search = await fetch(
+        `https://nominatim.openstreetmap.org/search?street=${encodeURIComponent(street)}&city=Montréal&format=json&polygon_geojson=1`
+    ).then(r => r.json());
 
     streetLayer.clearLayers();
-    if (json.length > 0 && json[0].geojson) {
-        streetLayer.addData(json[0].geojson);
+    if (search.length > 0 && search[0].geojson) {
+        streetLayer.addData(search[0].geojson);
     }
 
     L.popup()
         .setLatLng(e.latlng)
         .setContent(`
             <b>Rue :</b> ${street}<br>
-            <b>Lignes STM :</b> ${matching.length ? matching.join(", ") : "Aucune"}
+            <b>Lignes STM :</b> ${lines.length ? lines.join(", ") : "Aucune"}
         `)
         .openOn(map);
 });
