@@ -3,9 +3,8 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Détours STM</title>
+  <title>TEST CARTE</title>
 
-  <!-- Leaflet CSS -->
   <link
     rel="stylesheet"
     href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
@@ -16,245 +15,28 @@
       height: 100%;
       margin: 0;
       padding: 0;
+      background: #eee;
     }
 
     #map {
-      position: absolute;
-      top: 0;
-      bottom: 0;
-      width: 100%;
-      height: 100vh; /* FIX mobile */
+      width: 100vw;
+      height: 100vh;
+      background: yellow; /* DEBUG — DOIT ÊTRE VISIBLE */
     }
-
-    .info-banner {
-      position: absolute;
-      z-index: 1000;
-      top: 10px;
-      left: 50%;
-      transform: translateX(-50%);
-      background: white;
-      border-radius: 12px;
-      padding: 12px;
-      box-shadow: 0 2px 8px rgba(0,0,0,0.25);
-      font-family: sans-serif;
-      font-size: 16px;
-      max-width: 95%;
-    }
-
-    .legend {
-      background: white;
-      padding: 8px 10px;
-      border-radius: 8px;
-      box-shadow: 0 2px 6px rgba(0,0,0,0.25);
-      font-family: sans-serif;
-      font-size: 13px;
-    }
-    .legend-title { font-weight: bold; margin-bottom: 4px; }
-    .legend-line { display: flex; align-items: center; gap: 6px; }
-    .legend-color { width: 12px; height: 12px; border-radius: 999px; }
   </style>
 </head>
 
 <body>
-  <div class="info-banner">
-    👉 Clique une rue : j’affiche la rue <b>EXACTE</b> + les <b>lignes STM</b> associées + le <b>tracé</b>.
-  </div>
-
   <div id="map"></div>
 
-  <!-- Leaflet JS -->
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 
   <script>
-    /* -----------------------------
-     *  INITIALISATION DE LA CARTE
-     * ----------------------------- */
+    const map = L.map("map").setView([45.52, -73.57], 12);
 
-    const map = L.map("map").setView([45.52, -73.57], 13);
-
-    L.tileLayer(
-      "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",
-      { maxZoom: 19 }
-    ).addTo(map);
-
-    let currentStreetLayer = null;
-    let currentBusLayers = [];
-    let currentLegend = null;
-    let currentPopup = null;
-
-    const colors = ["#1f77b4","#ff7f0e","#2ca02c","#d62728","#9467bd",
-                    "#8c564b","#e377c2","#7f7f7f","#bcbd22","#17becf"];
-
-    function clearAll() {
-      if (currentStreetLayer) map.removeLayer(currentStreetLayer);
-      currentStreetLayer = null;
-
-      currentBusLayers.forEach(l => map.removeLayer(l));
-      currentBusLayers = [];
-
-      if (currentLegend) map.removeControl(currentLegend);
-      currentLegend = null;
-
-      if (currentPopup) map.closePopup(currentPopup);
-      currentPopup = null;
-    }
-
-    function geometryToCoords(geom) {
-      return geom.map(p => [p.lat, p.lon]);
-    }
-
-    /* -----------------------------
-     *  1. TROUVER LA RUE CLIQUÉE
-     * ----------------------------- */
-    async function getStreet(latlng) {
-      const query = `
-        [out:json][timeout:25];
-        way(around:15,${latlng.lat},${latlng.lng})["highway"]["name"];
-        out geom 1;
-      `;
-      const url =
-        "https://overpass-api.de/api/interpreter?data=" +
-        encodeURIComponent(query);
-
-      const res = await fetch(url);
-      const json = await res.json();
-
-      if (!json.elements.length) return null;
-      return json.elements[0];
-    }
-
-    /* -----------------------------
-     *  2. TROUVER LES LIGNES STM
-     * ----------------------------- */
-    async function getBusRoutes(wayId) {
-      const query = `
-        [out:json][timeout:25];
-        rel["route"="bus"](bw:${wayId});
-        (._; >;);
-        out geom;
-      `;
-
-      const url =
-        "https://overpass-api.de/api/interpreter?data=" +
-        encodeURIComponent(query);
-
-      const res = await fetch(url);
-      const json = await res.json();
-
-      const relations = json.elements.filter(e => e.type === "relation");
-      const ways = {};
-      json.elements
-        .filter(e => e.type === "way" && e.geometry)
-        .forEach(w => ways[w.id] = w);
-
-      return { relations, ways };
-    }
-
-    /* -----------------------------
-     *  3. AFFICHAGE COMPLET
-     * ----------------------------- */
-    function drawAll(latlng, street, routes) {
-      const streetName = street.tags.name;
-
-      // --- Tracer la rue sélectionnée ---
-      currentStreetLayer = L.polyline(
-        geometryToCoords(street.geometry),
-        { color: "black", weight: 6, opacity: 0.6 }
-      ).addTo(map);
-
-      map.fitBounds(currentStreetLayer.getBounds(), { padding: [50, 50] });
-
-      const { relations, ways } = routes;
-
-      if (!relations.length) {
-        currentPopup = L.popup()
-          .setLatLng(latlng)
-          .setContent(`<b>Rue :</b> ${streetName}<br>Aucune ligne STM ici.`)
-          .openOn(map);
-        return;
-      }
-
-      // Regroupe les tracés par ref de ligne
-      const grouped = {};
-      const usedColors = {};
-
-      relations.forEach(rel => {
-        const ref = rel.tags.ref || "?";
-
-        if (!grouped[ref]) grouped[ref] = [];
-
-        rel.members
-          .filter(m => m.type === "way" && ways[m.ref])
-          .forEach(m => {
-            grouped[ref].push(geometryToCoords(ways[m.ref].geometry));
-          });
-      });
-
-      // Dessiner les lignes
-      const refs = Object.keys(grouped).sort((a,b)=>a.localeCompare(b,'fr',{numeric:true}));
-
-      refs.forEach((ref, i) => {
-        const color = colors[i % colors.length];
-
-        grouped[ref].forEach(coords => {
-          const line = L.polyline(coords, {
-            color,
-            weight: 4,
-            opacity: 0.9
-          }).addTo(map);
-
-          currentBusLayers.push(line);
-        });
-
-        usedColors[ref] = color;
-      });
-
-      // Popup
-      currentPopup = L.popup()
-        .setLatLng(latlng)
-        .setContent(
-          `<b>Rue :</b> ${streetName}<br><b>Lignes STM :</b> ${refs.join(", ")}`
-        )
-        .openOn(map);
-
-      // Légende
-      currentLegend = L.control({ position: "bottomleft" });
-      currentLegend.onAdd = () => {
-        const div = L.DomUtil.create("div", "legend");
-        div.innerHTML = '<div class="legend-title">Lignes STM</div>';
-
-        refs.forEach(ref => {
-          div.innerHTML += `
-            <div class="legend-line">
-              <span class="legend-color" style="background:${usedColors[ref]}"></span>
-              Ligne ${ref}
-            </div>
-          `;
-        });
-
-        return div;
-      };
-      currentLegend.addTo(map);
-    }
-
-    /* -----------------------------
-     *  4. CLIC SUR LA CARTE
-     * ----------------------------- */
-    map.on("click", async e => {
-      clearAll();
-
-      const street = await getStreet(e.latlng);
-      if (!street) {
-        currentPopup = L.popup()
-          .setLatLng(e.latlng)
-          .setContent("Aucune rue trouvée ici.")
-          .openOn(map);
-        return;
-      }
-
-      const routes = await getBusRoutes(street.id);
-      drawAll(e.latlng, street, routes);
-    });
+    L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+      maxZoom: 19
+    }).addTo(map);
   </script>
 </body>
 </html>
