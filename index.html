@@ -3,9 +3,8 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Carte test</title>
+  <title>TEST CLIC</title>
 
-  <!-- Leaflet -->
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 
@@ -21,22 +20,20 @@
     }
   </style>
 </head>
-
 <body>
 
   <div id="map"></div>
 
   <script>
-    // --- Carte ---
-    const map = L.map('map').setView([45.508, -73.587], 12);
+    const map = L.map('map').setView([45.508, -73.587], 13);
 
-    L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
-      maxZoom: 19
-    }).addTo(map);
+    L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
 
-    // --- Test clic ---
-    map.on("click", (e) => {
-      alert("CLIC détecté !\nLat : " + e.latlng.lat + "\nLng : " + e.latlng.lng);
+    alert("Carte Leaflet chargée !");
+
+    // TEST DU CLIC
+    map.on("click", () => {
+      alert("CLIC détecté !");
     });
   </script>
 
