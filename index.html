@@ -38,6 +38,7 @@ let streetLayer = L.geoJSON(null, {
     style: { color: "purple", weight: 6 }
 }).addTo(map);
 
+// Lignes STM → mapping simple
 const stmLines = [
     { line: "24", streets: ["Sherbrooke"] },
     { line: "105", streets: ["Sherbrooke"] },
@@ -45,13 +46,32 @@ const stmLines = [
     { line: "356", streets: ["Sherbrooke"] }
 ];
 
+// Fonction Overpass → récupère la géométrie exacte
+async function getStreetGeometry(streetName) {
+    const query = `
+        [out:json];
+        way["name"="${streetName}"](area:3600065713);
+        out geom;
+    `;
+
+    const res = await fetch("https://overpass-api.de/api/interpreter", {
+        method: "POST",
+        body: query
+    });
+
+    const json = await res.json();
+    return json.elements;
+}
+
 map.on("click", async function(e) {
 
     const lat = e.latlng.lat;
     const lon = e.latlng.lng;
 
-    const rev = await fetch(`https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lon}&format=json`)
-                        .then(r => r.json());
+    // 1. Nom exact via reverse geocoding
+    const rev = await fetch(
+        `https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lon}&format=json`
+    ).then(r => r.json());
 
     if (!rev.address || !rev.address.road) {
         alert("Rue inconnue.");
@@ -60,21 +80,25 @@ map.on("click", async function(e) {
 
     const street = rev.address.road;
 
-    // Trouver les lignes STM associées
+    // 2. Lignes STM
     const lines = stmLines
         .filter(l => l.streets.some(s => street.includes(s)))
         .map(l => l.line);
 
-    // Récupérer le tracé exact
-    const search = await fetch(
-        `https://nominatim.openstreetmap.org/search?street=${encodeURIComponent(street)}&city=Montréal&format=json&polygon_geojson=1`
-    ).then(r => r.json());
+    // 3. Géométrie EXACTE via Overpass
+    const geom = await getStreetGeometry(street);
 
     streetLayer.clearLayers();
-    if (search.length > 0 && search[0].geojson) {
-        streetLayer.addData(search[0].geojson);
-    }
 
+    geom.forEach(w => {
+        const coords = w.geometry.map(p => [p.lat, p.lon]);
+        streetLayer.addData({
+            type: "Feature",
+            geometry: { type: "LineString", coordinates: coords.map(c => [c[1], c[0]]) }
+        });
+    });
+
+    // 4. Popup
     L.popup()
         .setLatLng(e.latlng)
         .setContent(`
