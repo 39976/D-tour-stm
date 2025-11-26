@@ -3,11 +3,10 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Détours STM - Carte Test</title>
+  <title>Carte test</title>
 
-  <link rel="stylesheet"
-        href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
-
+  <!-- Leaflet -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 
   <style>
@@ -28,16 +27,17 @@
   <div id="map"></div>
 
   <script>
-    // Initialisation de la carte centrée sur Montréal
+    // --- Carte ---
     const map = L.map('map').setView([45.508, -73.587], 12);
 
-    // Chargement du fond OpenStreetMap
     L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
-      maxZoom: 19,
-      attribution: '&copy; OpenStreetMap'
+      maxZoom: 19
     }).addTo(map);
 
-    alert("Carte Leaflet chargée !");
+    // --- Test clic ---
+    map.on("click", (e) => {
+      alert("CLIC détecté !\nLat : " + e.latlng.lat + "\nLng : " + e.latlng.lng);
+    });
   </script>
 
 </body>
