@@ -1,83 +1,121 @@
 <!DOCTYPE html>
 <html lang="fr">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Détours STM</title>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Détours STM</title>
 
-  <!-- Leaflet -->
-  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
-  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <!-- Leaflet -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 
-  <style>
-      html, body {
-          height: 100%;
-          margin: 0;
-          padding: 0;
-      }
-      #map { 
-          height: 100%; 
-          width: 100%;
-      }
-      #info {
-          position: absolute;
-          top: 10px;
-          left: 10px;
-          padding: 10px 15px;
-          background: white;
-          border-radius: 10px;
-          box-shadow: 0 0 10px rgba(0,0,0,0.2);
-          font-size: 18px;
-          z-index: 9999;
-      }
-  </style>
+    <style>
+        html, body {
+            height: 100%;
+            margin: 0;
+            padding: 0;
+        }
+
+        #map {
+            height: 100%;
+            width: 100%;
+        }
+
+        .info-box {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            z-index: 1000;
+            background: white;
+            padding: 14px;
+            border-radius: 12px;
+            font-size: 18px;
+            box-shadow: 0px 0px 10px rgba(0,0,0,0.2);
+        }
+    </style>
 </head>
-
 <body>
 
-<div id="info">👉 Clique une rue : j’affiche la rue EXACTE.</div>
+<div class="info-box">👉 Clique une rue : j’affiche la rue EXACTE + les lignes STM.</div>
 <div id="map"></div>
 
 <script>
-  const map = L.map('map').setView([45.508, -73.587], 13);
+// ===============================
+// 🗺️ 1. INITIALISATION CARTE
+// ===============================
+const map = L.map("map").setView([45.5017, -73.5673], 15);
 
-  L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
-      maxZoom: 19
-  }).addTo(map);
+L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+    maxZoom: 19
+}).addTo(map);
 
-  let polyline = null;
+// ===============================
+// 🟣 2. LAYER POUR LA LIGNE CLIQUÉE
+// ===============================
+let streetLayer = L.geoJSON(null, {
+    style: { color: "#7c00ff", weight: 6 }
+}).addTo(map);
 
-  map.on("click", async function (e) {
-      const lat = e.latlng.lat;
-      const lon = e.latlng.lng;
+// ===============================
+// 🚍 3. LISTE DES LIGNES STM (simplifiée)
+// ===============================
+const stmLines = [
+    { name: "24", streets: ["Sherbrooke", "Rue Sherbrooke Ouest", "Rue Sherbrooke Est"] },
+    { name: "105", streets: ["Sherbrooke", "Rue Sherbrooke Ouest"] },
+    { name: "138", streets: ["Sherbrooke", "Rue Sherbrooke Ouest"] },
+    { name: "356", streets: ["Sherbrooke", "Rue Sherbrooke Ouest"] }
+];
 
-      const url = `https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lon}&format=json&zoom=18&polygon_geojson=1`;
+// ===============================
+// 🎯 4. DÉTECTION DE LA RUE CLIQUÉE
+// ===============================
+map.on("click", async function (e) {
+    const lat = e.latlng.lat;
+    const lon = e.latlng.lng;
 
-      const data = await (await fetch(url)).json();
+    // Reverse geocoding
+    const url = `https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lon}&format=json`;
+    const data = await fetch(url).then(r => r.json());
 
-      if (!data.address || !data.geojson) {
-          alert("Aucune rue trouvée.");
-          return;
-      }
+    if (!data || !data.address || !data.address.road) {
+        alert("Impossible de détecter cette rue.");
+        return;
+    }
 
-      const rue = data.address.road || data.display_name;
+    const street = data.address.road;
 
-      // Effacer ancienne ligne
-      if (polyline) map.removeLayer(polyline);
+    // ===============================
+    // 🚌 TROUVER LES LIGNES STM ASSOCIÉES
+    // ===============================
+    const matchingLines = stmLines
+        .filter(l => l.streets.some(s => street.includes(s)))
+        .map(l => l.name);
 
-      // Tracer la géométrie si disponible
-      if (data.geojson.type === "LineString") {
-          polyline = L.polyline(data.geojson.coordinates.map(c => [c[1], c[0]]), {
-              color: "purple",
-              weight: 6
-          }).addTo(map);
-      }
+    // ===============================
+    // 🟣 AFFICHER LE TRACÉ EXACT DE LA RUE
+    // ===============================
+    streetLayer.clearLayers();
 
-      L.popup()
+    const searchUrl = `https://nominatim.openstreetmap.org/search?street=${encodeURIComponent(street)}&city=Montréal&format=json&polygon_geojson=1`;
+
+    const streetData = await fetch(searchUrl).then(r => r.json());
+
+    if (streetData.length > 0 && streetData[0].geojson) {
+        streetLayer.addData(streetData[0].geojson);
+    }
+
+    // ===============================
+    // 📌 POPUP
+    // ===============================
+    L.popup()
         .setLatLng(e.latlng)
-        .setContent(`<b>Rue :</b> ${rue}`)
+        .setContent(`
+            <b>Rue :</b> ${street}<br>
+            <b>Lignes STM :</b> ${matchingLines.length ? matchingLines.join(", ") : "Aucune trouvée"}
+        `)
         .openOn(map);
-  });
+});
+
 </script>
 
 </body>
