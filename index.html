@@ -2,14 +2,14 @@
 <html lang="fr">
 <head>
 <meta charset="UTF-8">
-<title>STM – Arrêts & Lignes</title>
+<title>STM – Rues, Lignes & Arrêts</title>
 
-<!-- Leaflet CSS -->
-<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
 
 <style>
     body, html { margin: 0; padding: 0; height: 100%; }
-    #map { width: 100%; height: 100%; }
+    #map { height: 100%; width: 100%; }
+    .popup-title { font-weight: bold; font-size: 16px; }
 </style>
 </head>
 
@@ -17,81 +17,170 @@
 
 <div id="map"></div>
 
-<!-- Leaflet JS -->
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 
 <script>
-// ------------------------------------------------------------
-//  INITIALISATION DE LA CARTE
-// ------------------------------------------------------------
+// ======================================================
+//  INITIALISATION MAP
+// ======================================================
 const map = L.map("map").setView([45.55, -73.65], 12);
 
 L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
-    attribution: '&copy; OpenStreetMap'
+    attribution: "&copy; OpenStreetMap"
 }).addTo(map);
 
-// ------------------------------------------------------------
-//  FONCTION : CHARGER TOUS LES ARRÊTS STM
-// ------------------------------------------------------------
-async function afficherArretsSTM() {
-    const url = "https://overpass-api.de/api/interpreter";
 
-    const stopsQuery = `
+// ======================================================
+// 1) CLIQUER SUR UNE RUE → AFFICHER RUE + LIGNES STM
+// ======================================================
+
+// Couche pour effacer la rue précédente
+let rueLayer = null;
+let ligneLayer = null;
+
+// Clic sur la carte pour sélectionner une rue
+map.on("click", async (e) => {
+    const lat = e.latlng.lat;
+    const lon = e.latlng.lng;
+
+    // ---------------------------------------------
+    // 1️⃣ Trouver la rue EXACTE (multi-ways corrigé)
+    // ---------------------------------------------
+    const queryRue = `
+    [out:json][timeout:25];
+    way(around:10, ${lat}, ${lon})["highway"];
+    out geom;
+    `;
+
+    const resRue = await fetch("https://overpass-api.de/api/interpreter", {
+        method: "POST",
+        body: queryRue
+    });
+    const dataRue = await resRue.json();
+    if (!dataRue.elements.length) return;
+
+    const rue = dataRue.elements[0];
+
+    // Effacer l'ancienne rue
+    if (rueLayer) map.removeLayer(rueLayer);
+
+    // Dessiner la rue
+    rueLayer = L.polyline(rue.geometry.map(p => [p.lat, p.lon]), {
+        color: "blue",
+        weight: 6
+    }).addTo(map);
+
+    // ---------------------------------------------
+    // 2️⃣ Trouver les lignes STM qui passent sur cette rue
+    // ---------------------------------------------
+    const queryLignes = `
+    [out:json][timeout:25];
+    rel(bw:${rue.id})["route"="bus"]["network"="STM"];
+    out body;
+    >;
+    out skel qt;
+    `;
+
+    const resLignes = await fetch("https://overpass-api.de/api/interpreter", {
+        method: "POST",
+        body: queryLignes
+    });
+    const dataLignes = await resLignes.json();
+
+    const refs = [...new Set(
+        dataLignes.elements
+            .filter(el => el.type === "relation")
+            .map(el => el.tags.ref)
+    )];
+
+    // Popup d'information sur la rue
+    rueLayer.bindPopup(`
+        <div class="popup-title">${rue.tags.name || "Rue inconnue"}</div>
+        <b>Lignes STM :</b><br>
+        ${refs.length ? refs.map(r => "• " + r).join("<br>") : "Aucune"}
+    `).openPopup();
+
+    // ---------------------------------------------
+    // 3️⃣ Afficher le tracé des lignes STM
+    // ---------------------------------------------
+    if (ligneLayer) map.removeLayer(ligneLayer);
+
+    const allWayIds = dataLignes.elements
+        .filter(el => el.type === "way")
+        .map(el => el.id);
+
+    const ways = dataLignes.elements.filter(el => el.type === "way");
+
+    ligneLayer = L.layerGroup();
+
+    ways.forEach(w => {
+        if (!w.geometry) return;
+        L.polyline(w.geometry.map(p => [p.lat, p.lon]), {
+            color: "red",
+            weight: 3
+        }).addTo(ligneLayer);
+    });
+
+    ligneLayer.addTo(map);
+});
+
+
+// ======================================================
+// 2) AFFICHAGE DES ARRÊTS STM + POPUP LIGNES
+// ======================================================
+
+async function STMStops_load() {
+    const query = `
     [out:json][timeout:35];
     (
       node["highway"="bus_stop"]["operator"="STM"](area:3600065600);
       node["highway"="bus_stop"]["network"="STM"](area:3600065600);
     );
     out body;
-    >;
-    out skel qt;
     `;
 
-    const response = await fetch(url, {
+    const res = await fetch("https://overpass-api.de/api/interpreter", {
         method: "POST",
-        body: stopsQuery
+        body: query
     });
 
-    const data = await response.json();
+    const data = await res.json();
 
     data.elements.forEach(stop => {
         const marker = L.circleMarker([stop.lat, stop.lon], {
-            radius: 6,
-            color: "#007bff",
-            fillColor: "#2d8cff",
+            radius: 5,
+            color: "#004CFF",
+            fillColor: "#0067FF",
             fillOpacity: 0.9,
             weight: 1
         }).addTo(map);
 
-        marker.on("click", () => afficherLignesPourArret(stop, marker));
+        marker.on("click", () => STMStops_showInfo(stop, marker));
     });
 }
 
-// ------------------------------------------------------------
-//  FONCTION : AFFICHER LES LIGNES QUI PASSENT À L’ARRÊT
-// ------------------------------------------------------------
-async function afficherLignesPourArret(stop, marker) {
 
-    const url = "https://overpass-api.de/api/interpreter";
-
-    const relationsQuery = `
+async function STMStops_showInfo(stop, marker) {
+    const q = `
     [out:json][timeout:35];
     rel(bn:${stop.id})["route"="bus"]["network"="STM"];
     out body;
     `;
 
-    const response = await fetch(url, {
+    const res = await fetch("https://overpass-api.de/api/interpreter", {
         method: "POST",
-        body: relationsQuery
+        body: q
     });
 
-    const data = await response.json();
+    const data = await res.json();
 
-    const lignes = data.elements.map(rel => {
-        const ref = rel.tags.ref || "?";
-        const dir = rel.tags.direction || rel.tags.to || "";
-        return dir ? `${ref} → ${dir}` : ref;
-    });
+    const lignes = data.elements
+        .filter(el => el.type === "relation")
+        .map(rel => {
+            const ref = rel.tags.ref || "?";
+            const dir = rel.tags.direction || rel.tags.to || "";
+            return dir ? `${ref} → ${dir}` : ref;
+        });
 
     const stopId =
         stop.tags["ref:STM"] ||
@@ -99,23 +188,19 @@ async function afficherLignesPourArret(stop, marker) {
         stop.tags.ref ||
         stop.id;
 
-    const stopName = stop.tags.name || "Arrêt STM";
-
-    const popupHtml = `
-        <b>${stopName}</b><br>
+    marker.bindPopup(`
+        <div class="popup-title">${stop.tags.name || "Arrêt STM"}</div>
         <b>ID STM :</b> ${stopId}<br>
         <b>Lignes :</b><br>
-        ${lignes.length ? lignes.map(l => "• " + l).join("<br>") : "Aucune donnée"}
-    `;
-
-    marker.bindPopup(popupHtml).openPopup();
+        ${lignes.length ? lignes.map(l => "• " + l).join("<br>") : "Aucune"}
+    `).openPopup();
 }
 
-// ------------------------------------------------------------
-//  LANCER LE CHARGEMENT DES ARRÊTS STM
-// ------------------------------------------------------------
-afficherArretsSTM();
+
+// Charger les arrêts STM
+STMStops_load();
 
 </script>
+
 </body>
 </html>
