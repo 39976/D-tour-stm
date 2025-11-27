@@ -4,7 +4,6 @@
 <meta charset="UTF-8">
 <title>STM – Rues, Lignes & Arrêts</title>
 
-<!-- Leaflet -->
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
 
 <style>
@@ -18,12 +17,11 @@
         height: 100%;
     }
 
-    /* Popups style Google Maps-like */
+    /* Popups style Google Maps */
     .leaflet-popup-content {
         font-size: 15px;
         font-family: Arial, sans-serif;
         line-height: 1.45;
-        padding: 6px;
     }
     .popup-title {
         font-weight: bold;
@@ -37,18 +35,16 @@
 
 <div id="map"></div>
 
-<!-- Leaflet JS -->
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 
 <script>
-// ===================================================================
-//  INITIALISATION DE LA MAP (Optimisée Mobile)
-// ===================================================================
+// ====================================================================
+//  MAP INIT (optimisé téléphone)
+// ====================================================================
 const map = L.map("map", {
     zoomControl: true,
     minZoom: 3,
-    maxZoom: 22,
-    tap: true
+    maxZoom: 22
 }).setView([45.55, -73.65], 14);
 
 L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
@@ -58,20 +54,20 @@ L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
 }).addTo(map);
 
 
-// ===================================================================
-//  ICONES GOOGLE MAPS-LIKE (Icône STM bleue – choix B)
-// ===================================================================
+// ====================================================================
+//  ICÔNE STM (bus bleu)
+// ====================================================================
 const stmIcon = L.icon({
-    iconUrl: "https://i.imgur.com/IIZOOia.png",   // Icône STM
-    iconSize: [38, 38],  // adapté téléphone
+    iconUrl: "https://i.imgur.com/IIZOOia.png",
+    iconSize: [38, 38],
     iconAnchor: [19, 38],
     popupAnchor: [0, -35]
 });
 
 
-// ===================================================================
+// ====================================================================
 // 1) CLIQUER SUR UNE RUE → MULTI-WAYS + LIGNES STM
-// ===================================================================
+// ====================================================================
 let rueLayer = null;
 let ligneLayer = null;
 
@@ -80,9 +76,9 @@ map.on("click", async (e) => {
     const lat = e.latlng.lat;
     const lon = e.latlng.lng;
 
-    // -----------------------------------------
-    // Trouver la rue exacte (multi-ways corrigé)
-    // -----------------------------------------
+    // ----------------------------------------------------
+    // 1️⃣ Trouver la rue exacte (multi-ways corrigé)
+    // ----------------------------------------------------
     const queryRue = `
     [out:json][timeout:25];
     way(around:10, ${lat}, ${lon})["highway"];
@@ -102,20 +98,19 @@ map.on("click", async (e) => {
     if (rueLayer) map.removeLayer(rueLayer);
 
     rueLayer = L.polyline(rue.geometry.map(pt => [pt.lat, pt.lon]), {
-        color: "#1A73E8",    // bleu Google Maps
+        color: "#1A73E8",      // bleu Google Maps
         weight: 10,
         opacity: 0.85
     }).addTo(map);
 
-    map.panTo([lat, lon]); // auto-centrage mobile
+    map.panTo([lat, lon]);
 
-
-    // -----------------------------------------
-    // Lignes STM associées à cette rue
-    // -----------------------------------------
+    // ----------------------------------------------------
+    // 2️⃣ CORRECTION : trouver les lignes STM avec around()
+    // ----------------------------------------------------
     const queryLignes = `
-    [out:json][timeout:25];
-    rel(bw:${rue.id})["route"="bus"]["network"="STM"];
+    [out:json][timeout:40];
+    rel["route"="bus"]["network"="STM"](around:50, ${lat}, ${lon});
     out body;
     >;
     out skel qt;
@@ -129,10 +124,12 @@ map.on("click", async (e) => {
     const dataLignes = await resLignes.json();
 
     const refs = [...new Set(
-        dataLignes.elements.filter(el => el.type === "relation").map(el => el.tags.ref)
+        dataLignes.elements
+            .filter(el => el.type === "relation")
+            .map(el => el.tags.ref)
     )];
 
-    // Popup de la rue
+    // Popup rue
     rueLayer.bindPopup(`
         <div class="popup-title">${rue.tags.name || "Rue inconnue"}</div>
         <b>Lignes STM :</b><br>
@@ -140,9 +137,9 @@ map.on("click", async (e) => {
     `).openPopup();
 
 
-    // -------------------------------------------------
-    // Dessiner les tracés des lignes STM (en couleurs)
-    // -------------------------------------------------
+    // ----------------------------------------------------
+    // 3️⃣ Afficher les tracés des lignes STM
+    // ----------------------------------------------------
     if (ligneLayer) map.removeLayer(ligneLayer);
     ligneLayer = L.layerGroup();
 
@@ -163,10 +160,11 @@ map.on("click", async (e) => {
 });
 
 
-// ===================================================================
-// 2) AFFICHAGE DES ARRÊTS STM (Icônes bleues Google Maps)
-// ===================================================================
+// ====================================================================
+// 2) AFFICHAGE DES ARRÊTS STM
+// ====================================================================
 async function STMStops_load() {
+
     const query = `
     [out:json][timeout:35];
     (
@@ -184,19 +182,25 @@ async function STMStops_load() {
     const data = await res.json();
 
     data.elements.forEach(stop => {
+
         const marker = L.marker([stop.lat, stop.lon], {
             icon: stmIcon
         }).addTo(map);
 
         marker.on("click", () => STMStops_showInfo(stop, marker));
+
     });
 }
 
 
+// ====================================================================
+// 3) POPUP des ARRÊTS STM avec LIGNES
+// ====================================================================
 async function STMStops_showInfo(stop, marker) {
+
     const q = `
-    [out:json][timeout:35];
-    rel(bn:${stop.id})["route"="bus"]["network"="STM"];
+    [out:json][timeout:40];
+    rel["route"="bus"]["network"="STM"](around:40, ${stop.lat}, ${stop.lon});
     out body;
     `;
 
@@ -228,14 +232,13 @@ async function STMStops_showInfo(stop, marker) {
         ${lignes.length ? lignes.map(l => "• " + l).join("<br>") : "Aucune"}
     `).openPopup();
 
-    map.panTo([stop.lat, stop.lon]);  // centrer sur l’arrêt
+    map.panTo([stop.lat, stop.lon]);
 }
 
 
-// Charger tous les arrêts STM
+// Charger les arrêts STM
 STMStops_load();
 
 </script>
-
 </body>
 </html>
