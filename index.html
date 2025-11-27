@@ -1,6 +1,40 @@
-async function afficherArretsSTM(map) {
-    const url = "https://overpass-api.de/api/interpreter";
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<title>STM – Arrêts & Lignes</title>
 
+<!-- Leaflet CSS -->
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+
+<style>
+    body, html { margin: 0; padding: 0; height: 100%; }
+    #map { width: 100%; height: 100%; }
+</style>
+</head>
+
+<body>
+
+<div id="map"></div>
+
+<!-- Leaflet JS -->
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+<script>
+// ------------------------------------------------------------
+//  INITIALISATION DE LA CARTE
+// ------------------------------------------------------------
+const map = L.map("map").setView([45.55, -73.65], 12);
+
+L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
+    attribution: '&copy; OpenStreetMap'
+}).addTo(map);
+
+// ------------------------------------------------------------
+//  FONCTION : CHARGER TOUS LES ARRÊTS STM
+// ------------------------------------------------------------
+async function afficherArretsSTM() {
+    const url = "https://overpass-api.de/api/interpreter";
 
     const stopsQuery = `
     [out:json][timeout:35];
@@ -13,11 +47,14 @@ async function afficherArretsSTM(map) {
     out skel qt;
     `;
 
-    const stopsResponse = await fetch(url, { method: "POST", body: stopsQuery });
-    const stopsData = await stopsResponse.json();
+    const response = await fetch(url, {
+        method: "POST",
+        body: stopsQuery
+    });
 
-    for (const stop of stopsData.elements) {
+    const data = await response.json();
 
+    data.elements.forEach(stop => {
         const marker = L.circleMarker([stop.lat, stop.lon], {
             radius: 6,
             color: "#007bff",
@@ -27,10 +64,12 @@ async function afficherArretsSTM(map) {
         }).addTo(map);
 
         marker.on("click", () => afficherLignesPourArret(stop, marker));
-    }
+    });
 }
 
-
+// ------------------------------------------------------------
+//  FONCTION : AFFICHER LES LIGNES QUI PASSENT À L’ARRÊT
+// ------------------------------------------------------------
 async function afficherLignesPourArret(stop, marker) {
 
     const url = "https://overpass-api.de/api/interpreter";
@@ -41,17 +80,25 @@ async function afficherLignesPourArret(stop, marker) {
     out body;
     `;
 
-    const res = await fetch(url, { method: "POST", body: relationsQuery });
-    const data = await res.json();
-
-    // Préparer la liste des lignes
-    const lignes = data.elements.map(rel => {
-        const ref = rel.tags.ref || "???";
-        const dir = rel.tags.direction || rel.tags.to || "—";
-        return `${ref} → ${dir}`;
+    const response = await fetch(url, {
+        method: "POST",
+        body: relationsQuery
     });
 
-    const stopId = stop.tags["ref:STM"] || stop.tags["ref:stop_id"] || stop.tags.ref || stop.id;
+    const data = await response.json();
+
+    const lignes = data.elements.map(rel => {
+        const ref = rel.tags.ref || "?";
+        const dir = rel.tags.direction || rel.tags.to || "";
+        return dir ? `${ref} → ${dir}` : ref;
+    });
+
+    const stopId =
+        stop.tags["ref:STM"] ||
+        stop.tags["ref:stop_id"] ||
+        stop.tags.ref ||
+        stop.id;
+
     const stopName = stop.tags.name || "Arrêt STM";
 
     const popupHtml = `
@@ -64,5 +111,11 @@ async function afficherLignesPourArret(stop, marker) {
     marker.bindPopup(popupHtml).openPopup();
 }
 
+// ------------------------------------------------------------
+//  LANCER LE CHARGEMENT DES ARRÊTS STM
+// ------------------------------------------------------------
+afficherArretsSTM();
 
-afficherArretsSTM(map);
+</script>
+</body>
+</html>
