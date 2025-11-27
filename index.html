@@ -4,12 +4,32 @@
 <meta charset="UTF-8">
 <title>STM – Rues, Lignes & Arrêts</title>
 
+<!-- Leaflet -->
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
 
 <style>
-    body, html { margin: 0; padding: 0; height: 100%; }
-    #map { height: 100%; width: 100%; }
-    .popup-title { font-weight: bold; font-size: 16px; }
+    html, body {
+        margin: 0;
+        padding: 0;
+        height: 100%;
+    }
+    #map {
+        width: 100%;
+        height: 100%;
+    }
+
+    /* Popups style Google Maps-like */
+    .leaflet-popup-content {
+        font-size: 15px;
+        font-family: Arial, sans-serif;
+        line-height: 1.45;
+        padding: 6px;
+    }
+    .popup-title {
+        font-weight: bold;
+        font-size: 17px;
+        margin-bottom: 4px;
+    }
 </style>
 </head>
 
@@ -17,35 +37,52 @@
 
 <div id="map"></div>
 
+<!-- Leaflet JS -->
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 
 <script>
-// ======================================================
-//  INITIALISATION MAP
-// ======================================================
-const map = L.map("map").setView([45.55, -73.65], 12);
+// ===================================================================
+//  INITIALISATION DE LA MAP (Optimisée Mobile)
+// ===================================================================
+const map = L.map("map", {
+    zoomControl: true,
+    minZoom: 3,
+    maxZoom: 22,
+    tap: true
+}).setView([45.55, -73.65], 14);
 
 L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
-    attribution: "&copy; OpenStreetMap"
+    attribution: "&copy; OpenStreetMap",
+    maxZoom: 22,
+    maxNativeZoom: 19
 }).addTo(map);
 
 
-// ======================================================
-// 1) CLIQUER SUR UNE RUE → AFFICHER RUE + LIGNES STM
-// ======================================================
+// ===================================================================
+//  ICONES GOOGLE MAPS-LIKE (Icône STM bleue – choix B)
+// ===================================================================
+const stmIcon = L.icon({
+    iconUrl: "https://i.imgur.com/IIZOOia.png",   // Icône STM
+    iconSize: [38, 38],  // adapté téléphone
+    iconAnchor: [19, 38],
+    popupAnchor: [0, -35]
+});
 
-// Couche pour effacer la rue précédente
+
+// ===================================================================
+// 1) CLIQUER SUR UNE RUE → MULTI-WAYS + LIGNES STM
+// ===================================================================
 let rueLayer = null;
 let ligneLayer = null;
 
-// Clic sur la carte pour sélectionner une rue
 map.on("click", async (e) => {
+
     const lat = e.latlng.lat;
     const lon = e.latlng.lng;
 
-    // ---------------------------------------------
-    // 1️⃣ Trouver la rue EXACTE (multi-ways corrigé)
-    // ---------------------------------------------
+    // -----------------------------------------
+    // Trouver la rue exacte (multi-ways corrigé)
+    // -----------------------------------------
     const queryRue = `
     [out:json][timeout:25];
     way(around:10, ${lat}, ${lon})["highway"];
@@ -56,23 +93,26 @@ map.on("click", async (e) => {
         method: "POST",
         body: queryRue
     });
+
     const dataRue = await resRue.json();
     if (!dataRue.elements.length) return;
 
     const rue = dataRue.elements[0];
 
-    // Effacer l'ancienne rue
     if (rueLayer) map.removeLayer(rueLayer);
 
-    // Dessiner la rue
-    rueLayer = L.polyline(rue.geometry.map(p => [p.lat, p.lon]), {
-        color: "blue",
-        weight: 6
+    rueLayer = L.polyline(rue.geometry.map(pt => [pt.lat, pt.lon]), {
+        color: "#1A73E8",    // bleu Google Maps
+        weight: 10,
+        opacity: 0.85
     }).addTo(map);
 
-    // ---------------------------------------------
-    // 2️⃣ Trouver les lignes STM qui passent sur cette rue
-    // ---------------------------------------------
+    map.panTo([lat, lon]); // auto-centrage mobile
+
+
+    // -----------------------------------------
+    // Lignes STM associées à cette rue
+    // -----------------------------------------
     const queryLignes = `
     [out:json][timeout:25];
     rel(bw:${rue.id})["route"="bus"]["network"="STM"];
@@ -85,39 +125,37 @@ map.on("click", async (e) => {
         method: "POST",
         body: queryLignes
     });
+
     const dataLignes = await resLignes.json();
 
     const refs = [...new Set(
-        dataLignes.elements
-            .filter(el => el.type === "relation")
-            .map(el => el.tags.ref)
+        dataLignes.elements.filter(el => el.type === "relation").map(el => el.tags.ref)
     )];
 
-    // Popup d'information sur la rue
+    // Popup de la rue
     rueLayer.bindPopup(`
         <div class="popup-title">${rue.tags.name || "Rue inconnue"}</div>
         <b>Lignes STM :</b><br>
         ${refs.length ? refs.map(r => "• " + r).join("<br>") : "Aucune"}
     `).openPopup();
 
-    // ---------------------------------------------
-    // 3️⃣ Afficher le tracé des lignes STM
-    // ---------------------------------------------
-    if (ligneLayer) map.removeLayer(ligneLayer);
 
-    const allWayIds = dataLignes.elements
-        .filter(el => el.type === "way")
-        .map(el => el.id);
+    // -------------------------------------------------
+    // Dessiner les tracés des lignes STM (en couleurs)
+    // -------------------------------------------------
+    if (ligneLayer) map.removeLayer(ligneLayer);
+    ligneLayer = L.layerGroup();
 
     const ways = dataLignes.elements.filter(el => el.type === "way");
 
-    ligneLayer = L.layerGroup();
+    const colors = ["#DB4437","#0F9D58","#F4B400","#00A7E1","#A142F4"];
 
-    ways.forEach(w => {
+    ways.forEach((w, i) => {
         if (!w.geometry) return;
         L.polyline(w.geometry.map(p => [p.lat, p.lon]), {
-            color: "red",
-            weight: 3
+            color: colors[i % colors.length],
+            weight: 6,
+            opacity: 0.85
         }).addTo(ligneLayer);
     });
 
@@ -125,10 +163,9 @@ map.on("click", async (e) => {
 });
 
 
-// ======================================================
-// 2) AFFICHAGE DES ARRÊTS STM + POPUP LIGNES
-// ======================================================
-
+// ===================================================================
+// 2) AFFICHAGE DES ARRÊTS STM (Icônes bleues Google Maps)
+// ===================================================================
 async function STMStops_load() {
     const query = `
     [out:json][timeout:35];
@@ -147,12 +184,8 @@ async function STMStops_load() {
     const data = await res.json();
 
     data.elements.forEach(stop => {
-        const marker = L.circleMarker([stop.lat, stop.lon], {
-            radius: 5,
-            color: "#004CFF",
-            fillColor: "#0067FF",
-            fillOpacity: 0.9,
-            weight: 1
+        const marker = L.marker([stop.lat, stop.lon], {
+            icon: stmIcon
         }).addTo(map);
 
         marker.on("click", () => STMStops_showInfo(stop, marker));
@@ -194,10 +227,12 @@ async function STMStops_showInfo(stop, marker) {
         <b>Lignes :</b><br>
         ${lignes.length ? lignes.map(l => "• " + l).join("<br>") : "Aucune"}
     `).openPopup();
+
+    map.panTo([stop.lat, stop.lon]);  // centrer sur l’arrêt
 }
 
 
-// Charger les arrêts STM
+// Charger tous les arrêts STM
 STMStops_load();
 
 </script>
