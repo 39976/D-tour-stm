@@ -32,22 +32,18 @@
         font-weight: bold;
     }
 
-    /* Boutons custom Leaflet (mode sombre, GPS) */
-    .leaflet-control-custom {
-        background: #fff;
-        border-radius: 4px;
-        box-shadow: 0 1px 4px rgba(0,0,0,0.3);
-        cursor: pointer;
-    }
-    .leaflet-control-custom button {
-        border: none;
-        background: transparent;
-        padding: 6px 8px;
-        font-size: 14px;
-        font-family: Arial, sans-serif;
-    }
-    .leaflet-control-custom button:active {
-        background: #e0e0e0;
+    /* 🌟 Popup gigantifiée sur téléphone */
+    @media (max-width: 900px) {
+        .leaflet-popup-content-wrapper,
+        .leaflet-popup-tip {
+            transform: scale(1.8);
+            transform-origin: top left;
+        }
+
+        .leaflet-popup-content {
+            font-size: 18px !important;
+            line-height: 1.55;
+        }
     }
 </style>
 </head>
@@ -60,7 +56,7 @@
 
 <script>
 // ====================================================================
-//  MAP INIT (with light + dark layers)
+//  MAP INIT (light + dark)
 // ====================================================================
 const lightTiles = L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
     attribution: "&copy; OpenStreetMap",
@@ -94,18 +90,18 @@ const stmIcon = L.icon({
 
 
 // ====================================================================
-// 1) CLIQUER SUR UNE RUE → LIGNES STM
+// 1) CLIQUER SUR UNE RUE
 // ====================================================================
 let rueLayer = null;
-let ligneLayer = null;      // tracés liés au clic sur la rue
-let stopRouteLayer = null;  // tracés liés au clic sur un arrêt
+let ligneLayer = null;
+let stopRouteLayer = null;
 
 map.on("click", async (e) => {
 
     const lat = e.latlng.lat;
     const lon = e.latlng.lng;
 
-    // ---- 1) Rue exacte autour du clic ----
+    // ---- Rue exacte ----
     const queryRue = `
     [out:json][timeout:25];
     way(around:10, ${lat}, ${lon})["highway"];
@@ -123,6 +119,7 @@ map.on("click", async (e) => {
     const rue = dataRue.elements[0];
 
     if (rueLayer) map.removeLayer(rueLayer);
+
     rueLayer = L.polyline(rue.geometry.map(pt => [pt.lat, pt.lon]), {
         color: "#1A73E8",
         weight: 10,
@@ -131,7 +128,7 @@ map.on("click", async (e) => {
 
     map.panTo([lat, lon]);
 
-    // ---- 2) Lignes STM proches de ce point (around) ----
+    // ---- Lignes STM proches ----
     const queryLignes = `
     [out:json][timeout:40];
     rel["route"="bus"]["network"="STM"](around:50, ${lat}, ${lon});
@@ -153,216 +150,4 @@ map.on("click", async (e) => {
             .map(el => el.tags.ref)
     )];
 
-    const hasLines = refs.length > 0;
-
-    rueLayer.bindPopup(`
-        <div class="popup-title">${rue.tags.name || "Rue inconnue"}</div>
-        <b>Lignes STM :</b><br>
-        ${
-            hasLines
-            ? refs.map(r => "• " + r).join("<br>")
-            : '<span class="popup-hors-stm">Aucun service STM ici (hors territoire STM)</span>'
-        }
-    `).openPopup();
-
-    // ---- 3) Tracer les lignes STM trouvées ----
-    if (ligneLayer) map.removeLayer(ligneLayer);
-    ligneLayer = L.layerGroup();
-
-    const ways = dataLignes.elements.filter(el => el.type === "way");
-    const colors = ["#DB4437","#0F9D58","#F4B400","#00A7E1","#A142F4"];
-
-    ways.forEach((w, i) => {
-        if (!w.geometry) return;
-        L.polyline(w.geometry.map(p => [p.lat, p.lon]), {
-            color: colors[i % colors.length],
-            weight: 6,
-            opacity: 0.85
-        }).addTo(ligneLayer);
-    });
-
-    ligneLayer.addTo(map);
-
-    // On efface les tracés liés au dernier arrêt cliqué
-    if (stopRouteLayer) {
-        map.removeLayer(stopRouteLayer);
-        stopRouteLayer = null;
-    }
-});
-
-
-// ====================================================================
-// 2) ARRÊTS STM
-// ====================================================================
-async function STMStops_load() {
-
-    const query = `
-    [out:json][timeout:35];
-    (
-      node["highway"="bus_stop"]["operator"="STM"](area:3600065600);
-      node["highway"="bus_stop"]["network"="STM"](area:3600065600);
-    );
-    out body;
-    `;
-
-    const res = await fetch("https://overpass-api.de/api/interpreter", {
-        method: "POST",
-        body: query
-    });
-
-    const data = await res.json();
-
-    data.elements.forEach(stop => {
-
-        const marker = L.marker([stop.lat, stop.lon], {
-            icon: stmIcon
-        }).addTo(map);
-
-        marker.on("click", () => STMStops_showInfo(stop, marker));
-    });
-}
-
-
-// ====================================================================
-// 3) POPUP + TRAJETS COMPLETS D’UN ARRÊT STM
-// ====================================================================
-async function STMStops_showInfo(stop, marker) {
-
-    const q = `
-    [out:json][timeout:40];
-    rel["route"="bus"]["network"="STM"](around:40, ${stop.lat}, ${stop.lon});
-    out body;
-    >;
-    out geom;
-    `;
-
-    const res = await fetch("https://overpass-api.de/api/interpreter", {
-        method: "POST",
-        body: q
-    });
-
-    const data = await res.json();
-
-    const relations = data.elements.filter(el => el.type === "relation");
-    const ways = data.elements.filter(el => el.type === "way");
-
-    const lignes = relations.map(rel => {
-        const ref = rel.tags.ref || "?";
-        const dir = rel.tags.direction || rel.tags.to || "";
-        return dir ? `${ref} → ${dir}` : ref;
-    });
-
-    const hasLines = lignes.length > 0;
-
-    const stopId =
-        stop.tags["ref:STM"] ||
-        stop.tags["ref:stop_id"] ||
-        stop.tags.ref ||
-        stop.id;
-
-    marker.bindPopup(`
-        <div class="popup-title">${stop.tags.name || "Arrêt STM"}</div>
-        <b>ID STM :</b> ${stopId}<br>
-        <b>Lignes :</b><br>
-        ${
-            hasLines
-            ? lignes.map(l => "• " + l).join("<br>")
-            : '<span class="popup-hors-stm">Aucun service STM ici (hors territoire STM)</span>'
-        }
-    `).openPopup();
-
-    map.panTo([stop.lat, stop.lon]);
-
-    // --- Tracer les trajets complets des lignes trouvées ---
-    if (stopRouteLayer) map.removeLayer(stopRouteLayer);
-    stopRouteLayer = L.layerGroup();
-
-    const colors = ["#DB4437","#0F9D58","#F4B400","#00A7E1","#A142F4"];
-
-    ways.forEach((w, i) => {
-        if (!w.geometry) return;
-        L.polyline(w.geometry.map(p => [p.lat, p.lon]), {
-            color: colors[i % colors.length],
-            weight: 5,
-            opacity: 0.8,
-            dashArray: "4,4"
-        }).addTo(stopRouteLayer);
-    });
-
-    stopRouteLayer.addTo(map);
-}
-
-
-// Charger les arrêts STM
-STMStops_load();
-
-
-// ====================================================================
-// 4) BOUTON MODE SOMBRE / CLAIR
-// ====================================================================
-let isDark = false;
-
-const DarkControl = L.Control.extend({
-    options: { position: "topright" },
-    onAdd: function(map) {
-        const container = L.DomUtil.create("div", "leaflet-control-custom");
-        const btn = L.DomUtil.create("button", "", container);
-        btn.innerText = "Mode sombre";
-
-        L.DomEvent.on(btn, "click", (e) => {
-            L.DomEvent.stopPropagation(e);
-            if (isDark) {
-                map.removeLayer(darkTiles);
-                map.addLayer(lightTiles);
-                btn.innerText = "Mode sombre";
-                isDark = false;
-            } else {
-                map.removeLayer(lightTiles);
-                map.addLayer(darkTiles);
-                btn.innerText = "Mode clair";
-                isDark = true;
-            }
-        });
-
-        return container;
-    }
-});
-map.addControl(new DarkControl());
-
-
-// ====================================================================
-// 5) BOUTON GPS "ME CENTRER"
-// ====================================================================
-const LocateControl = L.Control.extend({
-    options: { position: "bottomright" },
-    onAdd: function(map) {
-        const container = L.DomUtil.create("div", "leaflet-control-custom");
-        const btn = L.DomUtil.create("button", "", container);
-        btn.innerText = "📍 Moi";
-
-        L.DomEvent.on(btn, "click", (e) => {
-            L.DomEvent.stopPropagation(e);
-            if (!navigator.geolocation) {
-                alert("La géolocalisation n'est pas supportée.");
-                return;
-            }
-            navigator.geolocation.getCurrentPosition(
-                (pos) => {
-                    const lat = pos.coords.latitude;
-                    const lon = pos.coords.longitude;
-                    map.setView([lat, lon], 16);
-                },
-                () => {
-                    alert("Impossible de récupérer ta position.");
-                }
-            );
-        });
-
-        return container;
-    }
-});
-map.addControl(new LocateControl());
-
-</script>
-</body>
-</html>
+    const hasLines = refs.length >
