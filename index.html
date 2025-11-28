@@ -17,33 +17,40 @@
         height: 100%;
     }
 
-    .leaflet-popup-content {
-        font-size: 15px;
+    /* FICHE ULTRA MOBILE */
+    #mobileInfoBox {
+        position: fixed;
+        bottom: 20px;
+        left: 50%;
+        transform: translateX(-50%);
+        width: 90%;
+        max-height: 55%;
+        background: white;
+        border-radius: 12px;
+        box-shadow: 0 4px 20px rgba(0,0,0,0.35);
+        padding: 18px;
         font-family: Arial, sans-serif;
-        line-height: 1.45;
+        font-size: 20px;
+        line-height: 1.55;
+        display: none;
+        overflow-y: auto;
+        z-index: 9999;
     }
-    .popup-title {
+    #mobileInfoBox .title {
+        font-size: 23px;
         font-weight: bold;
-        font-size: 17px;
-        margin-bottom: 4px;
+        margin-bottom: 10px;
     }
-    .popup-hors-stm {
-        color: #d93025;
+    #closeMobileBox {
+        display: block;
+        margin-top: 18px;
+        text-align: center;
+        padding: 10px;
+        background: #1A73E8;
+        color: white;
+        border-radius: 8px;
+        font-size: 20px;
         font-weight: bold;
-    }
-
-    /* 🌟 Popup gigantifiée sur téléphone */
-    @media (max-width: 900px) {
-        .leaflet-popup-content-wrapper,
-        .leaflet-popup-tip {
-            transform: scale(1.8);
-            transform-origin: top left;
-        }
-
-        .leaflet-popup-content {
-            font-size: 18px !important;
-            line-height: 1.55;
-        }
     }
 </style>
 </head>
@@ -52,30 +59,29 @@
 
 <div id="map"></div>
 
+<!-- FICHE ULTRA-MOBILE -->
+<div id="mobileInfoBox">
+    <div id="mobileContent"></div>
+    <div id="closeMobileBox">Fermer</div>
+</div>
+
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 
 <script>
 // ====================================================================
-//  MAP INIT (light + dark)
+//  MAP INIT
 // ====================================================================
-const lightTiles = L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
-    attribution: "&copy; OpenStreetMap",
-    maxZoom: 22,
-    maxNativeZoom: 19
-});
-
-const darkTiles = L.tileLayer("https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png", {
-    attribution: "&copy; OpenStreetMap, © CARTO",
-    maxZoom: 22,
-    maxNativeZoom: 19
-});
-
 const map = L.map("map", {
     zoomControl: true,
     minZoom: 3,
-    maxZoom: 22,
-    layers: [lightTiles]
+    maxZoom: 22
 }).setView([45.55, -73.65], 14);
+
+L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
+    attribution: "&copy; OpenStreetMap",
+    maxZoom: 22,
+    maxNativeZoom: 19
+}).addTo(map);
 
 
 // ====================================================================
@@ -83,10 +89,25 @@ const map = L.map("map", {
 // ====================================================================
 const stmIcon = L.icon({
     iconUrl: "https://i.imgur.com/IIZOOia.png",
-    iconSize: [38, 38],
-    iconAnchor: [19, 38],
+    iconSize: [40, 40],
+    iconAnchor: [20, 40],
     popupAnchor: [0, -35]
 });
+
+
+// ====================================================================
+//  FONCTIONS POPUP ULTRA MOBILE
+// ====================================================================
+const mobileBox = document.getElementById("mobileInfoBox");
+const mobileContent = document.getElementById("mobileContent");
+document.getElementById("closeMobileBox").onclick = () => {
+    mobileBox.style.display = "none";
+};
+
+function showMobilePopup(html) {
+    mobileContent.innerHTML = html;
+    mobileBox.style.display = "block";
+}
 
 
 // ====================================================================
@@ -101,7 +122,7 @@ map.on("click", async (e) => {
     const lat = e.latlng.lat;
     const lon = e.latlng.lng;
 
-    // ---- Rue exacte ----
+    // Rue autour du clic
     const queryRue = `
     [out:json][timeout:25];
     way(around:10, ${lat}, ${lon})["highway"];
@@ -128,13 +149,11 @@ map.on("click", async (e) => {
 
     map.panTo([lat, lon]);
 
-    // ---- Lignes STM proches ----
+    // Lignes STM proches
     const queryLignes = `
     [out:json][timeout:40];
     rel["route"="bus"]["network"="STM"](around:50, ${lat}, ${lon});
-    out body;
-    >;
-    out geom;
+    out body; >; out geom;
     `;
 
     const resLignes = await fetch("https://overpass-api.de/api/interpreter", {
@@ -145,9 +164,128 @@ map.on("click", async (e) => {
     const dataLignes = await resLignes.json();
 
     const refs = [...new Set(
-        dataLignes.elements
-            .filter(el => el.type === "relation")
-            .map(el => el.tags.ref)
+        dataLignes.elements.filter(el => el.type === "relation").map(el => el.tags.ref)
     )];
 
-    const hasLines = refs.length >
+    const hasLines = refs.length > 0;
+
+    // POPUP ULTRA MOBILE
+    showMobilePopup(`
+        <div class="title">${rue.tags.name || "Rue inconnue"}</div>
+        <b>Lignes STM :</b><br>
+        ${
+            hasLines
+            ? refs.map(r => "• " + r).join("<br>")
+            : "<span style='color:#d93025;font-weight:bold;'>Aucun service STM ici (hors territoire STM)</span>"
+        }
+    `);
+
+    // Tracer les lignes
+    if (ligneLayer) map.removeLayer(ligneLayer);
+    ligneLayer = L.layerGroup();
+
+    const ways = dataLignes.elements.filter(el => el.type === "way");
+
+    const colors = ["#DB4437","#0F9D58","#F4B400","#00A7E1","#A142F4"];
+    ways.forEach((w, i) => {
+        if (!w.geometry) return;
+        L.polyline(w.geometry.map(p => [p.lat, p.lon]), {
+            color: colors[i % colors.length],
+            weight: 6,
+            opacity: 0.85
+        }).addTo(ligneLayer);
+    });
+
+    ligneLayer.addTo(map);
+
+    if (stopRouteLayer) {
+        map.removeLayer(stopRouteLayer);
+        stopRouteLayer = null;
+    }
+});
+
+
+// ====================================================================
+// 2) ARRÊTS STM
+// ====================================================================
+async function STMStops_load() {
+
+    const query = `
+    [out:json][timeout:35];
+    (
+      node["highway"="bus_stop"]["operator"="STM"](area:3600065600);
+      node["highway"="bus_stop"]["network"="STM"](area:3600065600);
+    );
+    out body;
+    `;
+
+    const res = await fetch("https://overpass-api.de/api/interpreter", {
+        method: "POST",
+        body: query
+    });
+
+    const data = await res.json();
+
+    data.elements.forEach(stop => {
+
+        const marker = L.marker([stop.lat, stop.lon], {
+            icon: stmIcon
+        }).addTo(map);
+
+        marker.on("click", () => STMStops_showInfo(stop));
+    });
+}
+
+STMStops_load();
+
+
+// ====================================================================
+// 3) POPUP ULTRA MOBILE POUR ARRÊTS STM
+// ====================================================================
+async function STMStops_showInfo(stop) {
+
+    const q = `
+    [out:json][timeout:40];
+    rel["route"="bus"]["network"="STM"](around:40, ${stop.lat}, ${stop.lon});
+    out body; >; out geom;
+    `;
+
+    const res = await fetch("https://overpass-api.de/api/interpreter", {
+        method: "POST",
+        body: q
+    });
+
+    const data = await res.json();
+
+    const relations = data.elements.filter(el => el.type === "relation");
+    const lignes = relations.map(rel => {
+        const ref = rel.tags.ref || "?";
+        const dir = rel.tags.direction || rel.tags.to || "";
+        return dir ? `${ref} → ${dir}` : ref;
+    });
+
+    const hasLines = lignes.length > 0;
+
+    const stopId =
+        stop.tags["ref:STM"] ||
+        stop.tags["ref:stop_id"] ||
+        stop.tags.ref ||
+        stop.id;
+
+    showMobilePopup(`
+        <div class="title">${stop.tags.name || "Arrêt STM"}</div>
+        <b>ID STM :</b> ${stopId}<br><br>
+        <b>Lignes :</b><br>
+        ${
+            hasLines
+            ? lignes.map(l => "• " + l).join("<br>")
+            : "<span style='color:#d93025;font-weight:bold;'>Aucun service STM ici (hors territoire STM)</span>"
+        }
+    `);
+
+    map.panTo([stop.lat, stop.lon]);
+}
+
+</script>
+</body>
+</html>
