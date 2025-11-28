@@ -11,59 +11,165 @@
         margin: 0;
         padding: 0;
         height: 100%;
+        font-family: Arial, sans-serif;
     }
     #map {
         width: 100%;
         height: 100%;
     }
 
-    /* FICHE ULTRA MOBILE */
-    #mobileInfoBox {
+    /* Barre de recherche style app STM (bleu) */
+    #searchBar {
         position: fixed;
-        bottom: 20px;
+        top: 10px;
         left: 50%;
         transform: translateX(-50%);
         width: 90%;
+        max-width: 600px;
+        z-index: 1000;
+        display: flex;
+        gap: 6px;
+        background: #005AAF;
+        padding: 8px;
+        border-radius: 999px;
+        box-shadow: 0 3px 10px rgba(0,0,0,0.35);
+        align-items: center;
+    }
+    #searchInput {
+        flex: 1;
+        border: none;
+        border-radius: 999px;
+        padding: 8px 12px;
+        font-size: 15px;
+    }
+    #searchInput:focus {
+        outline: none;
+    }
+    #searchBtn {
+        border: none;
+        border-radius: 999px;
+        padding: 8px 14px;
+        background: #FFD100;
+        color: #003366;
+        font-weight: bold;
+        cursor: pointer;
+        font-size: 14px;
+        white-space: nowrap;
+    }
+    #searchHelp {
+        color: #E6F1FF;
+        font-size: 11px;
+        margin-left: 4px;
+    }
+
+    /* FICHE ULTRA MOBILE EN BAS */
+    #mobileInfoBox {
+        position: fixed;
+        bottom: 15px;
+        left: 50%;
+        transform: translateX(-50%);
+        width: 94%;
+        max-width: 700px;
         max-height: 55%;
         background: white;
-        border-radius: 12px;
+        border-radius: 14px;
         box-shadow: 0 4px 20px rgba(0,0,0,0.35);
-        padding: 18px;
-        font-family: Arial, sans-serif;
-        font-size: 20px;
+        padding: 16px;
+        font-size: 16px;
         line-height: 1.55;
         display: none;
         overflow-y: auto;
-        z-index: 9999;
+        z-index: 999;
     }
     #mobileInfoBox .title {
-        font-size: 23px;
+        font-size: 20px;
         font-weight: bold;
+        margin-bottom: 8px;
+    }
+    #mobileInfoBox .subtitle {
+        font-size: 14px;
+        color: #555;
         margin-bottom: 10px;
     }
     #closeMobileBox {
         display: block;
-        margin-top: 18px;
+        margin-top: 14px;
         text-align: center;
-        padding: 10px;
-        background: #1A73E8;
+        padding: 8px;
+        background: #005AAF;
         color: white;
         border-radius: 8px;
-        font-size: 20px;
+        font-size: 16px;
         font-weight: bold;
+        cursor: pointer;
+    }
+    .popup-hors-stm {
+        color: #d93025;
+        font-weight: bold;
+    }
+    .line-list button {
+        width: 100%;
+        text-align: left;
+        margin: 3px 0;
+        padding: 6px 8px;
+        border-radius: 6px;
+        border: 1px solid #ddd;
+        background: #f5f5f5;
+        cursor: pointer;
+        font-size: 15px;
+    }
+    .line-list button:hover {
+        background: #e8f0ff;
+    }
+    .small-tag {
+        display: inline-block;
+        padding: 2px 6px;
+        border-radius: 999px;
+        background: #eef3ff;
+        color: #333;
+        font-size: 11px;
+        margin-left: 4px;
+    }
+    .section-title {
+        margin-top: 10px;
+        font-weight: bold;
+        font-size: 15px;
+    }
+    ol.stop-list {
+        margin-top: 6px;
+        padding-left: 20px;
+        font-size: 14px;
+        max-height: 180px;
+        overflow-y: auto;
+    }
+
+    @media (max-width: 900px) {
+        #mobileInfoBox {
+            font-size: 18px;
+        }
+        #mobileInfoBox .title {
+            font-size: 22px;
+        }
+        ol.stop-list {
+            font-size: 16px;
+        }
     }
 </style>
 </head>
 
 <body>
 
-<div id="map"></div>
+<div id="searchBar">
+    <input id="searchInput" type="text" placeholder="Adresse, rue, arrêt ou ligne STM (ex: 24)" />
+    <button id="searchBtn">Rechercher</button>
+</div>
 
-<!-- FICHE ULTRA-MOBILE -->
 <div id="mobileInfoBox">
     <div id="mobileContent"></div>
     <div id="closeMobileBox">Fermer</div>
 </div>
+
+<div id="map"></div>
 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 
@@ -96,7 +202,7 @@ const stmIcon = L.icon({
 
 
 // ====================================================================
-//  FONCTIONS POPUP ULTRA MOBILE
+//  FICHE ULTRA MOBILE
 // ====================================================================
 const mobileBox = document.getElementById("mobileInfoBox");
 const mobileContent = document.getElementById("mobileContent");
@@ -104,112 +210,26 @@ document.getElementById("closeMobileBox").onclick = () => {
     mobileBox.style.display = "none";
 };
 
-function showMobilePopup(html) {
+function showMobileHTML(html) {
     mobileContent.innerHTML = html;
     mobileBox.style.display = "block";
 }
 
 
 // ====================================================================
-// 1) CLIQUER SUR UNE RUE
+//  ÉTATS GLOBAUX
 // ====================================================================
 let rueLayer = null;
 let ligneLayer = null;
 let stopRouteLayer = null;
-
-map.on("click", async (e) => {
-
-    const lat = e.latlng.lat;
-    const lon = e.latlng.lng;
-
-    // Rue autour du clic
-    const queryRue = `
-    [out:json][timeout:25];
-    way(around:10, ${lat}, ${lon})["highway"];
-    out geom;
-    `;
-
-    const resRue = await fetch("https://overpass-api.de/api/interpreter", {
-        method: "POST",
-        body: queryRue
-    });
-
-    const dataRue = await resRue.json();
-    if (!dataRue.elements.length) return;
-
-    const rue = dataRue.elements[0];
-
-    if (rueLayer) map.removeLayer(rueLayer);
-
-    rueLayer = L.polyline(rue.geometry.map(pt => [pt.lat, pt.lon]), {
-        color: "#1A73E8",
-        weight: 10,
-        opacity: 0.85
-    }).addTo(map);
-
-    map.panTo([lat, lon]);
-
-    // Lignes STM proches
-    const queryLignes = `
-    [out:json][timeout:40];
-    rel["route"="bus"]["network"="STM"](around:50, ${lat}, ${lon});
-    out body; >; out geom;
-    `;
-
-    const resLignes = await fetch("https://overpass-api.de/api/interpreter", {
-        method: "POST",
-        body: queryLignes
-    });
-
-    const dataLignes = await resLignes.json();
-
-    const refs = [...new Set(
-        dataLignes.elements.filter(el => el.type === "relation").map(el => el.tags.ref)
-    )];
-
-    const hasLines = refs.length > 0;
-
-    // POPUP ULTRA MOBILE
-    showMobilePopup(`
-        <div class="title">${rue.tags.name || "Rue inconnue"}</div>
-        <b>Lignes STM :</b><br>
-        ${
-            hasLines
-            ? refs.map(r => "• " + r).join("<br>")
-            : "<span style='color:#d93025;font-weight:bold;'>Aucun service STM ici (hors territoire STM)</span>"
-        }
-    `);
-
-    // Tracer les lignes
-    if (ligneLayer) map.removeLayer(ligneLayer);
-    ligneLayer = L.layerGroup();
-
-    const ways = dataLignes.elements.filter(el => el.type === "way");
-
-    const colors = ["#DB4437","#0F9D58","#F4B400","#00A7E1","#A142F4"];
-    ways.forEach((w, i) => {
-        if (!w.geometry) return;
-        L.polyline(w.geometry.map(p => [p.lat, p.lon]), {
-            color: colors[i % colors.length],
-            weight: 6,
-            opacity: 0.85
-        }).addTo(ligneLayer);
-    });
-
-    ligneLayer.addTo(map);
-
-    if (stopRouteLayer) {
-        map.removeLayer(stopRouteLayer);
-        stopRouteLayer = null;
-    }
-});
+let allStops = [];  // {marker, id, tags}
+let filteredStopsForLine = null; // ref de la ligne filtrante (ou null)
 
 
 // ====================================================================
-// 2) ARRÊTS STM
+//  CHARGEMENT DE TOUS LES ARRÊTS STM
 // ====================================================================
 async function STMStops_load() {
-
     const query = `
     [out:json][timeout:35];
     (
@@ -227,12 +247,10 @@ async function STMStops_load() {
     const data = await res.json();
 
     data.elements.forEach(stop => {
+        const marker = L.marker([stop.lat, stop.lon], { icon: stmIcon }).addTo(map);
+        allStops.push({ marker, id: stop.id, tags: stop.tags });
 
-        const marker = L.marker([stop.lat, stop.lon], {
-            icon: stmIcon
-        }).addTo(map);
-
-        marker.on("click", () => STMStops_showInfo(stop));
+        marker.on("click", () => handleStopClick(stop));
     });
 }
 
@@ -240,10 +258,126 @@ STMStops_load();
 
 
 // ====================================================================
-// 3) POPUP ULTRA MOBILE POUR ARRÊTS STM
+//  CLIQUE SUR LA CARTE → INFO SUR LA RUE + LIGNES STM
 // ====================================================================
-async function STMStops_showInfo(stop) {
+map.on("click", e => handleMapClick(e.latlng.lat, e.latlng.lng));
 
+async function handleMapClick(lat, lon) {
+    // 1) Trouver la rue
+    const queryRue = `
+    [out:json][timeout:25];
+    way(around:10, ${lat}, ${lon})["highway"];
+    out geom;
+    `;
+
+    const resRue = await fetch("https://overpass-api.de/api/interpreter", {
+        method: "POST",
+        body: queryRue
+    });
+
+    const dataRue = await resRue.json();
+    if (!dataRue.elements.length) return;
+
+    const rue = dataRue.elements[0];
+
+    if (rueLayer) map.removeLayer(rueLayer);
+    rueLayer = L.polyline(rue.geometry.map(pt => [pt.lat, pt.lon]), {
+        color: "#1A73E8",
+        weight: 10,
+        opacity: 0.85
+    }).addTo(map);
+
+    map.panTo([lat, lon]);
+
+    // 2) Lignes STM autour du point
+    const queryLignes = `
+    [out:json][timeout:40];
+    rel["route"="bus"]["network"="STM"](around:50, ${lat}, ${lon});
+    out body; >; out geom;
+    `;
+
+    const resLignes = await fetch("https://overpass-api.de/api/interpreter", {
+        method: "POST",
+        body: queryLignes
+    });
+
+    const dataLignes = await resLignes.json();
+    const relations = dataLignes.elements.filter(el => el.type === "relation");
+
+    const lines = relations.map(rel => {
+        return {
+            ref: rel.tags.ref || "?",
+            direction: rel.tags.direction || rel.tags.to || "",
+            id: rel.id
+        };
+    });
+
+    const uniqueLines = [];
+    const seen = new Set();
+    for (const l of lines) {
+        if (l.ref && !seen.has(l.ref + "|" + l.direction)) {
+            seen.add(l.ref + "|" + l.direction);
+            uniqueLines.push(l);
+        }
+    }
+
+    // 3) Fiche mobile
+    if (!uniqueLines.length) {
+        showMobileHTML(`
+            <div class="title">${rue.tags.name || "Rue inconnue"}</div>
+            <div class="subtitle">Informations STM à proximité</div>
+            <span class="popup-hors-stm">Aucun service STM ici (hors territoire STM)</span>
+        `);
+    } else {
+        const linesHtml = uniqueLines.map(l => `
+            <button class="line-btn" data-ref="${l.ref}">
+                Ligne ${l.ref} ${l.direction ? "→ " + l.direction : ""}
+                <span class="small-tag">Trajet & arrêts</span>
+            </button>
+        `).join("");
+
+        showMobileHTML(`
+            <div class="title">${rue.tags.name || "Rue inconnue"}</div>
+            <div class="subtitle">Lignes STM passant à proximité</div>
+            <div class="line-list">
+                ${linesHtml}
+            </div>
+            <div class="section-title">Filtrer les arrêts :</div>
+            <div style="font-size:13px;margin-bottom:4px;">Clique sur une ligne pour afficher son trajet complet et filtrer les arrêts.</div>
+        `);
+
+        bindLineButtons();
+    }
+
+    // 4) Tracer LÉGÈREMENT les lignes STM autour (contexte)
+    if (ligneLayer) map.removeLayer(ligneLayer);
+    ligneLayer = L.layerGroup();
+
+    const ways = dataLignes.elements.filter(el => el.type === "way");
+    const colors = ["#DB4437","#0F9D58","#F4B400","#00A7E1","#A142F4"];
+
+    ways.forEach((w, i) => {
+        if (!w.geometry) return;
+        L.polyline(w.geometry.map(p => [p.lat, p.lon]), {
+            color: colors[i % colors.length],
+            weight: 4,
+            opacity: 0.6
+        }).addTo(ligneLayer);
+    });
+
+    ligneLayer.addTo(map);
+
+    if (stopRouteLayer) {
+        map.removeLayer(stopRouteLayer);
+        stopRouteLayer = null;
+    }
+}
+
+
+// ====================================================================
+//  CLIQUE SUR UN ARRÊT STM
+// ====================================================================
+async function handleStopClick(stop) {
     const q = `
     [out:json][timeout:40];
     rel["route"="bus"]["network"="STM"](around:40, ${stop.lat}, ${stop.lon});
@@ -256,15 +390,22 @@ async function STMStops_showInfo(stop) {
     });
 
     const data = await res.json();
-
     const relations = data.elements.filter(el => el.type === "relation");
-    const lignes = relations.map(rel => {
-        const ref = rel.tags.ref || "?";
-        const dir = rel.tags.direction || rel.tags.to || "";
-        return dir ? `${ref} → ${dir}` : ref;
-    });
 
-    const hasLines = lignes.length > 0;
+    const lines = relations.map(rel => ({
+        ref: rel.tags.ref || "?",
+        direction: rel.tags.direction || rel.tags.to || "",
+        id: rel.id
+    }));
+
+    const uniqueLines = [];
+    const seen = new Set();
+    for (const l of lines) {
+        if (l.ref && !seen.has(l.ref + "|" + l.direction)) {
+            seen.add(l.ref + "|" + l.direction);
+            uniqueLines.push(l);
+        }
+    }
 
     const stopId =
         stop.tags["ref:STM"] ||
@@ -272,20 +413,217 @@ async function STMStops_showInfo(stop) {
         stop.tags.ref ||
         stop.id;
 
-    showMobilePopup(`
-        <div class="title">${stop.tags.name || "Arrêt STM"}</div>
-        <b>ID STM :</b> ${stopId}<br><br>
-        <b>Lignes :</b><br>
-        ${
-            hasLines
-            ? lignes.map(l => "• " + l).join("<br>")
-            : "<span style='color:#d93025;font-weight:bold;'>Aucun service STM ici (hors territoire STM)</span>"
-        }
-    `);
+    if (!uniqueLines.length) {
+        showMobileHTML(`
+            <div class="title">${stop.tags.name || "Arrêt STM"}</div>
+            <div class="subtitle">ID STM : ${stopId}</div>
+            <span class="popup-hors-stm">Aucun service STM ici (hors territoire STM)</span>
+        `);
+    } else {
+        const linesHtml = uniqueLines.map(l => `
+            <button class="line-btn" data-ref="${l.ref}">
+                Ligne ${l.ref} ${l.direction ? "→ " + l.direction : ""}
+                <span class="small-tag">Trajet & arrêts</span>
+            </button>
+        `).join("");
 
-    map.panTo([stop.lat, stop.lon]);
+        showMobileHTML(`
+            <div class="title">${stop.tags.name || "Arrêt STM"}</div>
+            <div class="subtitle">ID STM : ${stopId}</div>
+            <div class="section-title">Lignes :</div>
+            <div class="line-list">
+                ${linesHtml}
+            </div>
+            <div class="section-title">Filtrer les arrêts :</div>
+            <div style="font-size:13px;margin-bottom:4px;">Clique sur une ligne pour voir son trajet complet et ses arrêts.</div>
+        `);
+
+        map.panTo([stop.lat, stop.lon]);
+        bindLineButtons();
+    }
 }
 
+
+// ====================================================================
+//  CHARGER TRAJET COMPLET D’UNE LIGNE (ref) + STOPS
+// ====================================================================
+async function loadRouteByRef(ref) {
+    const query = `
+    [out:json][timeout:60];
+    relation["route"="bus"]["network"="STM"]["ref"="${ref}"];
+    (._;>;);
+    out body;
+    `;
+
+    const res = await fetch("https://overpass-api.de/api/interpreter", {
+        method: "POST",
+        body: query
+    });
+
+    const data = await res.json();
+    if (!data.elements.length) {
+        alert("Impossible de charger la ligne " + ref);
+        return;
+    }
+
+    const rels = data.elements.filter(el => el.type === "relation");
+    const ways = data.elements.filter(el => el.type === "way");
+    const nodes = data.elements.filter(el => el.type === "node");
+
+    const rel = rels[0];
+    const lineName = `Ligne ${ref}`;
+    const direction = rel.tags.to || rel.tags.direction || "";
+    const fullTitle = direction ? `${lineName} → ${direction}` : lineName;
+
+    // 1) tracer le trajet
+    if (stopRouteLayer) map.removeLayer(stopRouteLayer);
+    stopRouteLayer = L.layerGroup();
+
+    const colors = ["#DB4437","#0F9D58","#F4B400","#00A7E1","#A142F4"];
+    ways.forEach((w, i) => {
+        if (!w.geometry) return;
+        L.polyline(w.geometry.map(p => [p.lat, p.lon]), {
+            color: colors[i % colors.length],
+            weight: 6,
+            opacity: 0.9
+        }).addTo(stopRouteLayer);
+    });
+    stopRouteLayer.addTo(map);
+
+    // 2) récupérer les arrêts de la ligne (ordre relation)
+    const nodeById = new Map(nodes.map(n => [n.id, n]));
+    const orderedStops = [];
+    const stopIdsForFilter = new Set();
+
+    rel.members.forEach(m => {
+        if (m.type === "node") {
+            const node = nodeById.get(m.ref);
+            if (node && node.tags && node.tags.highway === "bus_stop") {
+                orderedStops.push(node);
+                stopIdsForFilter.add(node.id);
+            }
+        }
+    });
+
+    // 3) filtrer les arrêts sur la carte
+    filteredStopsForLine = ref;
+    allStops.forEach(s => {
+        if (stopIdsForFilter.has(s.id)) {
+            s.marker.setOpacity(1);
+        } else {
+            s.marker.setOpacity(0.2);
+        }
+    });
+
+    // 4) zoom sur la ligne
+    const allCoords = [];
+    ways.forEach(w => {
+        if (!w.geometry) return;
+        w.geometry.forEach(p => allCoords.push([p.lat, p.lon]));
+    });
+    if (allCoords.length) {
+        map.fitBounds(allCoords);
+    }
+
+    // 5) afficher le “tableau STM” des arrêts dans la fiche
+    const stopsHtml = orderedStops.length
+        ? `<ol class="stop-list">${orderedStops.map(n => `<li>${n.tags.name || "Arrêt sans nom"}</li>`).join("")}</ol>`
+        : "<span style='font-size:14px;'>Arrêts non disponibles dans la relation OSM.</span>";
+
+    showMobileHTML(`
+        <div class="title">${fullTitle}</div>
+        <div class="subtitle">Trajet complet & arrêts (données OSM / STM)</div>
+        <div class="section-title">Arrêts dans l'ordre du parcours :</div>
+        ${stopsHtml}
+        <div class="section-title">Astuce :</div>
+        <div style="font-size:13px;">
+            Les arrêts de cette ligne sont mis en évidence sur la carte.<br>
+            Les autres arrêts STM sont atténués.
+        </div>
+        <div id="resetFilterBtn" style="
+            margin-top:10px;
+            padding:8px;
+            background:#eee;
+            border-radius:8px;
+            text-align:center;
+            cursor:pointer;
+            font-size:14px;
+        ">
+            Réinitialiser le filtre des arrêts
+        </div>
+    `);
+
+    document.getElementById("resetFilterBtn").onclick = () => {
+        filteredStopsForLine = null;
+        allStops.forEach(s => s.marker.setOpacity(1));
+    };
+}
+
+
+// ====================================================================
+//  BIND DES BOUTONS “LIGNE …” DANS LA FICHE
+// ====================================================================
+function bindLineButtons() {
+    const buttons = document.querySelectorAll(".line-btn");
+    buttons.forEach(btn => {
+        btn.onclick = () => {
+            const ref = btn.getAttribute("data-ref");
+            if (ref) {
+                loadRouteByRef(ref);
+            }
+        };
+    });
+}
+
+
+// ====================================================================
+//  BARRE DE RECHERCHE (adresse / rue / ligne)
+// ====================================================================
+const searchInput = document.getElementById("searchInput");
+const searchBtn = document.getElementById("searchBtn");
+
+searchBtn.onclick = () => handleSearch();
+searchInput.addEventListener("keydown", e => {
+    if (e.key === "Enter") handleSearch();
+});
+
+async function handleSearch() {
+    const q = searchInput.value.trim();
+    if (!q) return;
+
+    // 1) si c’est un numéro → ligne STM
+    const lineMatch = q.match(/^(\d+)\s*$/);
+    if (lineMatch) {
+        const ref = lineMatch[1];
+        await loadRouteByRef(ref);
+        return;
+    }
+
+    // 2) sinon : géocodage OSM (Nominatim)
+    try {
+        const url = "https://nominatim.openstreetmap.org/search?format=json&limit=1&q=" + encodeURIComponent(q + ", Montréal, Canada");
+        const res = await fetch(url, {
+            headers: {
+                "Accept-Language": "fr"
+            }
+        });
+        const data = await res.json();
+        if (!data.length) {
+            alert("Aucun résultat trouvé pour : " + q);
+            return;
+        }
+        const place = data[0];
+        const lat = parseFloat(place.lat);
+        const lon = parseFloat(place.lon);
+
+        map.setView([lat, lon], 16);
+        // simulate click to show STM info around
+        handleMapClick(lat, lon);
+    } catch (err) {
+        console.error(err);
+        alert("Erreur lors de la recherche.");
+    }
+}
 </script>
 </body>
 </html>
