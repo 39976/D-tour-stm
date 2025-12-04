@@ -2,146 +2,48 @@
 <html lang="fr">
 <head>
 <meta charset="UTF-8">
-<title>STM – Rues, Lignes & Arrêts</title>
+<title>STM – Lignes & Arrêts</title>
 
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
 
 <style>
-    html, body {
-        margin: 0;
-        padding: 0;
-        height: 100%;
-        font-family: Arial, sans-serif;
+    html, body { margin:0; padding:0; height:100%; font-family:Arial; }
+    #map { width:100%; height:100%; }
+
+    #searchBar{
+        position:fixed; top:10px; left:50%; transform:translateX(-50%);
+        width:90%; max-width:600px; padding:8px; display:flex; gap:6px;
+        background:#005AAF; border-radius:999px; z-index:1000;
+        box-shadow:0 4px 12px rgba(0,0,0,.35);
     }
-    #map {
-        width: 100%;
-        height: 100%;
+    #searchInput{ flex:1; border:none; border-radius:999px; padding:8px 12px;font-size:15px;}
+    #searchBtn{
+        background:#FFD100; border:none; border-radius:999px;
+        padding:8px 14px; font-weight:bold; cursor:pointer;
     }
 
-    /* Barre de recherche STM */
-    #searchBar {
-        position: fixed;
-        top: 10px;
-        left: 50%;
-        transform: translateX(-50%);
-        width: 90%;
-        max-width: 600px;
-        z-index: 1000;
-        display: flex;
-        gap: 6px;
-        background: #005AAF;
-        padding: 8px;
-        border-radius: 999px;
-        box-shadow: 0 3px 10px rgba(0,0,0,0.35);
-        align-items: center;
+    #mobileInfoBox{
+        position:fixed; bottom:15px; left:50%; transform:translateX(-50%);
+        width:94%; max-width:700px; background:white; border-radius:14px;
+        max-height:55%; overflow-y:auto; z-index:999; display:none;
+        padding:14px; box-shadow:0 4px 22px rgba(0,0,0,.40);
     }
-    #searchInput {
-        flex: 1;
-        border: none;
-        border-radius: 999px;
-        padding: 8px 12px;
-        font-size: 15px;
+    #closeMobileBox{
+        margin-top:12px; padding:8px; border-radius:6px;text-align:center;
+        background:#005AAF; color:white; font-weight:bold; cursor:pointer;
     }
-    #searchInput:focus {
-        outline: none;
-    }
-    #searchBtn {
-        border: none;
-        border-radius: 999px;
-        padding: 8px 14px;
-        background: #FFD100;
-        color: #003366;
-        font-weight: bold;
-        cursor: pointer;
-        font-size: 14px;
-        white-space: nowrap;
-    }
-
-    /* Boîte mobile */
-    #mobileInfoBox {
-        position: fixed;
-        bottom: 15px;
-        left: 50%;
-        transform: translateX(-50%);
-        width: 94%;
-        max-width: 700px;
-        max-height: 55%;
-        background: white;
-        border-radius: 14px;
-        box-shadow: 0 4px 20px rgba(0,0,0,0.35);
-        padding: 16px;
-        font-size: 16px;
-        line-height: 1.55;
-        display: none;
-        overflow-y: auto;
-        z-index: 999;
-    }
-    #mobileInfoBox .title {
-        font-size: 20px;
-        font-weight: bold;
-        margin-bottom: 8px;
-    }
-    #closeMobileBox {
-        display: block;
-        margin-top: 14px;
-        text-align: center;
-        padding: 8px;
-        background: #005AAF;
-        color: white;
-        border-radius: 8px;
-        font-size: 16px;
-        font-weight: bold;
-        cursor: pointer;
-    }
-
-    .line-list button {
-        width: 100%;
-        text-align: left;
-        margin: 4px 0;
-        padding: 6px 8px;
-        border-radius: 6px;
-        border: 1px solid #ddd;
-        background: #f5f5f5;
-        cursor: pointer;
-        font-size: 15px;
-    }
-    .line-list button:hover {
-        background: #e8f0ff;
-    }
-
-    .small-tag {
-        display: inline-block;
-        padding: 2px 6px;
-        border-radius: 999px;
-        background: #eef3ff;
-        color: #333;
-        font-size: 11px;
-        margin-left: 4px;
-    }
-
-    .section-title {
-        margin-top: 10px;
-        font-weight: bold;
-        font-size: 15px;
-    }
-
-    ol.stop-list {
-        margin-top: 6px;
-        padding-left: 20px;
-        font-size: 14px;
-        max-height: 180px;
-        overflow-y: auto;
-    }
+    ol{ padding-left:18px; line-height:1.5; }
 </style>
 </head>
-
 <body>
 
+<!-- Barre de recherche -->
 <div id="searchBar">
-    <input id="searchInput" type="text" placeholder="Adresse, rue ou ligne (ex : 24)" />
+    <input id="searchInput" type="text" placeholder="Rue, adresse, ou ligne ex: 24">
     <button id="searchBtn">Rechercher</button>
 </div>
 
+<!-- Fenêtre mobile -->
 <div id="mobileInfoBox">
     <div id="mobileContent"></div>
     <div id="closeMobileBox">Fermer</div>
@@ -150,325 +52,142 @@
 <div id="map"></div>
 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-
 <script>
-// ========================================================
-// Map
-// ========================================================
-const map = L.map("map", {
-    zoomControl: true,
-    minZoom: 3,
-    maxZoom: 22
-}).setView([45.55, -73.65], 14);
 
-L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
-    attribution: "&copy; OpenStreetMap",
-    maxZoom: 22
-}).addTo(map);
+// 📌 Initialisation carte
+const map = L.map("map").setView([45.55,-73.65],14);
+L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png",{maxZoom:22}).addTo(map);
 
-// ========================================================
-// Icône STM
-// ========================================================
-const stmIcon = L.icon({
-    iconUrl: "https://i.imgur.com/IIZOOia.png",
-    iconSize: [40, 40],
-    iconAnchor: [20, 40]
-});
+// 📌 Icône STM
+const stmIcon=L.icon({iconUrl:"https://i.imgur.com/IIZOOia.png",iconSize:[40,40],iconAnchor:[20,40]});
 
-// ========================================================
-// Mobile box
-// ========================================================
-const mobileBox = document.getElementById("mobileInfoBox");
-const mobileContent = document.getElementById("mobileContent");
-document.getElementById("closeMobileBox").onclick = () => {
-    mobileBox.style.display = "none";
-};
+// 📌 Mobile UI
+const mobileBox=document.getElementById("mobileInfoBox");
+const mobileContent=document.getElementById("mobileContent");
+document.getElementById("closeMobileBox").onclick=()=>mobileBox.style.display="none";
+function show(html){mobileContent.innerHTML=html;mobileBox.style.display="block";}
 
-function showMobileHTML(html) {
-    mobileContent.innerHTML = html;
-    mobileBox.style.display = "block";
-}
-
-// ========================================================
-// Global layers
-// ========================================================
-let rueLayer = null;
-let ligneLayer = null;
-let stopRouteLayer = null;
-let allStops = [];
-let filteredStopsForLine = null;
-
-// ========================================================
-// Charger tous les arrêts STM
-// ========================================================
-async function loadAllStops() {
-    const query = `
+// ------------------------------------------------------------
+// 🔥 1) Charger tous les arrêts STM (fix confiable)
+// ------------------------------------------------------------
+async function loadAllStops(){
+    const query=`
     [out:json][timeout:40];
-    (
-      node["highway"="bus_stop"]["operator"="STM"](area:3600065600);
-      node["highway"="bus_stop"]["network"="STM"](area:3600065600);
-    );
+    area["name"="Montréal"]->.m;
+    node["highway"="bus_stop"]["network"="STM"](area.m);
     out body;
     `;
-
-    const res = await fetch("https://overpass-api.de/api/interpreter", {
-        method: "POST",
-        body: query
+    const res=await fetch("https://overpass-api.de/api/interpreter",{
+        method:"POST",
+        headers:{ "Content-Type":"application/x-www-form-urlencoded" },
+        body:"data="+encodeURIComponent(query)
     });
-    const data = await res.json();
+    const data=await res.json();
 
-    data.elements.forEach(stop => {
-        const m = L.marker([stop.lat, stop.lon], { icon: stmIcon }).addTo(map);
-        allStops.push({ id: stop.id, marker: m, tags: stop.tags });
-
-        m.on("click", () => handleStopClick(stop));
+    data.elements.forEach(stop=>{
+        const marker=L.marker([stop.lat,stop.lon],{icon:stmIcon}).addTo(map);
+        marker.on("click",()=>openStop(stop));
     });
 }
 loadAllStops();
 
-// ========================================================
-// Clique dans la carte → trouver la rue + lignes exactes
-// ========================================================
-map.on("click", e => handleMapClick(e.latlng.lat, e.latlng.lng));
-
-async function handleMapClick(lat, lon) {
-
-    // 1) Trouver la rue exacte
-    const qRue = `
-    [out:json][timeout:25];
-    way(around:10, ${lat}, ${lon})["highway"];
-    out geom tags;
-    `;
-    const rRue = await fetch("https://overpass-api.de/api/interpreter", { method: "POST", body: qRue });
-    const rueData = await rRue.json();
-
-    if (!rueData.elements.length) return;
-
-    const rue = rueData.elements[0];
-    const rueId = rue.id;
-
-    // Effacer ancien tracé
-    if (rueLayer) map.removeLayer(rueLayer);
-    rueLayer = L.polyline(rue.geometry.map(p => [p.lat, p.lon]), {
-        color: "#1A73E8",
-        weight: 10,
-        opacity: 0.85
-    }).addTo(map);
-
-    map.panTo([lat, lon]);
-
-    // 2) VRAIES lignes STM qui passent SUR cette rue (way)
-    const qLignes = `
-    [out:json][timeout:60];
-    rel["route"="bus"]["network"="STM"](bn.${rueId});
-    out body; >; out geom;
-    `;
-    const rL = await fetch("https://overpass-api.de/api/interpreter", { method: "POST", body: qLignes });
-    const dataL = await rL.json();
-
-    const rels = dataL.elements.filter(e => e.type === "relation");
-
-    const unique = [];
-    const seen = new Set();
-
-    rels.forEach(rel => {
-        const ref = rel.tags.ref || "?";
-        const dir = rel.tags.direction || rel.tags.to || "";
-        const key = ref + "|" + dir;
-
-        if (!seen.has(key)) {
-            seen.add(key);
-            unique.push({ ref, direction: dir });
-        }
-    });
-
-    // 3) Affichage mobile
-    if (!unique.length) {
-        showMobileHTML(`
-            <div class="title">${rue.tags.name || "Rue inconnue"}</div>
-            <span style="color:#d93025;font-weight:bold;">Aucune ligne STM sur cette rue</span>
-        `);
-    } else {
-        const html = unique.map(l => `
-            <button class="line-btn" data-ref="${l.ref}">
-                Ligne ${l.ref} ${l.direction ? "→ "+l.direction : ""}
-                <span class="small-tag">Trajet & arrêts</span>
-            </button>
-        `).join("");
-
-        showMobileHTML(`
-            <div class="title">${rue.tags.name || "Rue inconnue"}</div>
-            <div class="subtitle">Lignes STM sur cette rue :</div>
-            <div class="line-list">
-                ${html}
-            </div>
-        `);
-
-        bindLineButtons();
-    }
-
-    // Effacer ancien tracé de ligne
-    if (ligneLayer) map.removeLayer(ligneLayer);
-}
-
-// ========================================================
-// Clique sur un arrêt STM
-// ========================================================
-async function handleStopClick(stop) {
-    const q = `
+// ------------------------------------------------------------
+// 🔥 2) Clic sur arrêt → Lignes disponibles
+// ------------------------------------------------------------
+async function openStop(stop){
+    const q=`
     [out:json][timeout:40];
-    rel["route"="bus"]["network"="STM"](around:40, ${stop.lat}, ${stop.lon});
+    rel["route"="bus"]["network"="STM"](around:40,${stop.lat},${stop.lon});
     out body; >; out geom;
     `;
-    const r = await fetch("https://overpass-api.de/api/interpreter", { method: "POST", body: q });
-    const d = await r.json();
-
-    const rels = d.elements.filter(e => e.type === "relation");
-
-    const unique = [];
-    const seen = new Set();
-
-    rels.forEach(rel => {
-        const ref = rel.tags.ref || "?";
-        const dir = rel.tags.direction || rel.tags.to || "";
-        const key = ref + "|" + dir;
-
-        if (!seen.has(key)) {
-            seen.add(key);
-            unique.push({ ref, direction: dir });
-        }
+    const res=await fetch("https://overpass-api.de/api/interpreter",{
+        method:"POST",
+        headers:{ "Content-Type":"application/x-www-form-urlencoded" },
+        body:"data="+encodeURIComponent(q)
     });
+    const d=await res.json();
 
-    const stopId = stop.tags["ref:STM"] || stop.tags.ref || stop.id;
+    const lignes=[...new Set( d.elements
+        .filter(e=>e.type==="relation")
+        .map(r=>r.tags.ref)
+    )];
 
-    const linesHtml = unique.map(l => `
-        <button class="line-btn" data-ref="${l.ref}">
-            Ligne ${l.ref} ${l.direction ? "→ "+l.direction : ""}
-            <span class="small-tag">Trajet & arrêts</span>
-        </button>
-    `).join("");
-
-    showMobileHTML(`
-        <div class="title">${stop.tags.name || "Arrêt STM"}</div>
-        <div class="subtitle">ID STM : ${stopId}</div>
-
-        <div class="section-title">Lignes :</div>
-        <div class="line-list">
-            ${linesHtml}
-        </div>
+    show(`
+        <h2>${stop.tags.name||"Arrêt STM"}</h2>
+        <p><b>ID:</b> ${stop.id}</p><hr>
+        <h3>Lignes desservies :</h3>
+        ${lignes.map(l=>`<button onclick="loadRoute('${l}')">Ligne ${l}</button>`).join("<br>")}
     `);
-
-    map.panTo([stop.lat, stop.lon]);
-    bindLineButtons();
 }
 
-// ========================================================
-// Charger trajet STM complet
-// ========================================================
-async function loadRouteByRef(ref) {
-    const q = `
+// ------------------------------------------------------------
+// 🔥 3) Charger trajet complet d’une ligne
+// ------------------------------------------------------------
+async function loadRoute(ref){
+    const q=`
     [out:json][timeout:60];
     relation["route"="bus"]["network"="STM"]["ref"="${ref}"];
     (._;>;);
     out body;
     `;
-    const r = await fetch("https://overpass-api.de/api/interpreter", { method: "POST", body: q });
-    const d = await r.json();
-
-    if (!d.elements.length) {
-        alert("Ligne introuvable");
-        return;
-    }
-
-    const rel = d.elements.find(e => e.type === "relation");
-    const ways = d.elements.filter(e => e.type === "way");
-    const nodes = d.elements.filter(e => e.type === "node");
-
-    // tracer ligne
-    if (stopRouteLayer) map.removeLayer(stopRouteLayer);
-    stopRouteLayer = L.layerGroup();
-
-    ways.forEach(w => {
-        if (!w.geometry) return;
-        L.polyline(w.geometry.map(p => [p.lat, p.lon]), {
-            color: "#0F9D58",
-            weight: 6
-        }).addTo(stopRouteLayer);
+    const res=await fetch("https://overpass-api.de/api/interpreter",{
+        method:"POST",
+        headers:{ "Content-Type":"application/x-www-form-urlencoded" },
+        body:"data="+encodeURIComponent(q)
     });
-    stopRouteLayer.addTo(map);
+    const d=await res.json();
 
-    // Générer liste d'arrêts dans l'ordre
-    const nodeById = new Map(nodes.map(n => [n.id, n]));
-    const orderedStops = [];
+    const ways=d.elements.filter(e=>e.type==="way");
+    const nodes=d.elements.filter(e=>e.type==="node");
+    const member=d.elements.find(e=>e.type==="relation");
 
-    rel.members.forEach(m => {
-        if (m.type === "node") {
-            const node = nodeById.get(m.ref);
-            if (node && node.tags && node.tags.highway === "bus_stop") {
-                orderedStops.push(node);
-            }
+    if(!member) return alert("Ligne introuvable");
+
+    // tracer sur carte
+    if(window.routeLayer) map.removeLayer(window.routeLayer);
+    window.routeLayer=L.layerGroup().addTo(map);
+
+    ways.forEach(w=>{
+        if(w.geometry) L.polyline(w.geometry.map(p=>[p.lat,p.lon]),{color:"#0F9D58",weight:5}).addTo(window.routeLayer);
+    });
+
+    // liste arrêts ordonnés
+    const nodeMap=new Map(nodes.map(n=>[n.id,n]));
+    const stops=[];
+    member.members.forEach(m=>{
+        if(m.type==="node"){
+            const n=nodeMap.get(m.ref);
+            if(n?.tags?.highway==="bus_stop") stops.push(n.tags.name||"Arrêt");
         }
     });
 
-    const stopsHtml = orderedStops.length
-        ? `<ol class="stop-list">${orderedStops.map(n => `<li>${n.tags.name || "Arrêt"}</li>`).join("")}</ol>`
-        : "<span style='color:#d93025;'>Aucun arrêt trouvé.</span>";
-
-    showMobileHTML(`
-        <div class="title">Ligne ${ref}</div>
-        <div class="subtitle">Trajet complet & arrêts</div>
-
-        <div class="section-title">Arrêts :</div>
-        ${stopsHtml}
+    show(`
+        <h2>Ligne ${ref}</h2>
+        <h3>Arrêts dans l’ordre du parcours :</h3>
+        <ol>${stops.map(s=>`<li>${s}</li>`).join("")}</ol>
     `);
-
-    bindLineButtons();
 }
 
-// ========================================================
-// Boutons "Ligne …"
-// ========================================================
-function bindLineButtons() {
-    document.querySelectorAll(".line-btn").forEach(b =>
-        b.onclick = () => loadRouteByRef(b.getAttribute("data-ref"))
-    );
-}
+// ------------------------------------------------------------
+// 🔍 4) Recherche
+// ------------------------------------------------------------
+searchBtn.onclick=()=>search();
+searchInput.onkeydown=e=>{if(e.key==="Enter")search();};
 
-// ========================================================
-// Recherche
-// ========================================================
-document.getElementById("searchBtn").onclick = () => handleSearch();
-document.getElementById("searchInput").addEventListener("keydown", e => {
-    if (e.key === "Enter") handleSearch();
-});
+async function search(){
+    const q=searchInput.value.trim();
+    if(!q) return;
 
-async function handleSearch() {
-    const q = searchInput.value.trim();
-    if (!q) return;
+    // cas numéro → ligne directe
+    if(/^\d+$/.test(q)) return loadRoute(q);
 
-    // Si c’est un numéro : ligne STM
-    if (/^\d+$/.test(q)) {
-        loadRouteByRef(q);
-        return;
-    }
+    // géocodage adresse
+    const url=`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(q+" Montréal")}`;
+    const r=await fetch(url); const d=await r.json();
+    if(!d.length) return alert("Aucun résultat trouvé");
 
-    // Sinon géocodage
-    const url = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(q+" Montréal")}`;
-    const r = await fetch(url);
-    const d = await r.json();
-
-    if (!d.length) {
-        alert("Aucun résultat");
-        return;
-    }
-
-    const lat = parseFloat(d[0].lat);
-    const lon = parseFloat(d[0].lon);
-
-    map.setView([lat, lon], 16);
-    handleMapClick(lat, lon);
+    map.setView([d[0].lat,d[0].lon],16);
 }
 </script>
-
 </body>
 </html>
